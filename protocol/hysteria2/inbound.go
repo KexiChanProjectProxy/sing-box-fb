@@ -7,6 +7,7 @@ import (
 	"net/http/httputil"
 	"net/netip"
 	"net/url"
+	"sync"
 	"time"
 
 	"github.com/sagernet/sing-box/adapter"
@@ -32,6 +33,8 @@ func RegisterInbound(registry *inbound.Registry) {
 	inbound.Register[option.Hysteria2InboundOptions](registry, C.TypeHysteria2, NewInbound)
 }
 
+var _ adapter.ManagedUserInbound = (*Inbound)(nil)
+
 type Inbound struct {
 	inbound.Adapter
 	router       adapter.Router
@@ -40,6 +43,7 @@ type Inbound struct {
 	tlsConfig    tls.ServerConfig
 	service      *hysteria2.Service[int]
 	userNameList []string
+	userLock     sync.RWMutex
 }
 
 func NewInbound(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.Hysteria2InboundOptions) (adapter.Inbound, error) {
@@ -197,6 +201,30 @@ func NewInbound(ctx context.Context, router adapter.Router, logger log.ContextLo
 	return inbound, nil
 }
 
+// ReplaceUsers replaces the entire managed user set.
+// It implements adapter.ManagedUserInbound.
+func (h *Inbound) ReplaceUsers(users []adapter.ManagedUser) error {
+	userIDs := make([]int, len(users))
+	passwords := make([]string, len(users))
+	names := make([]string, len(users))
+	for i, u := range users {
+		userIDs[i] = i
+		passwords[i] = u.Credential.Password
+		if u.Name != "" {
+			names[i] = u.Name
+		} else {
+			names[i] = u.UserID
+		}
+	}
+	if h.service != nil {
+		h.service.UpdateUsers(userIDs, passwords)
+	}
+	h.userLock.Lock()
+	h.userNameList = names
+	h.userLock.Unlock()
+	return nil
+}
+
 func (h *Inbound) NewConnectionEx(ctx context.Context, conn net.Conn, source M.Socksaddr, destination M.Socksaddr, onClose N.CloseHandlerFunc) {
 	ctx = log.ContextWithNewID(ctx)
 	var metadata adapter.InboundContext
@@ -210,9 +238,16 @@ func (h *Inbound) NewConnectionEx(ctx context.Context, conn net.Conn, source M.S
 	metadata.Destination = destination
 	h.logger.InfoContext(ctx, "inbound connection from ", metadata.Source)
 	userID, _ := auth.UserFromContext[int](ctx)
-	if userName := h.userNameList[userID]; userName != "" {
-		metadata.User = userName
-		h.logger.InfoContext(ctx, "[", userName, "] inbound connection to ", metadata.Destination)
+	h.userLock.RLock()
+	userCount := len(h.userNameList)
+	userNme := ""
+	if userID < userCount {
+		userNme = h.userNameList[userID]
+	}
+	h.userLock.RUnlock()
+	if userNme != "" {
+		metadata.User = userNme
+		h.logger.InfoContext(ctx, "[", userNme, "] inbound connection to ", metadata.Destination)
 	} else {
 		h.logger.InfoContext(ctx, "inbound connection to ", metadata.Destination)
 	}
@@ -232,9 +267,16 @@ func (h *Inbound) NewPacketConnectionEx(ctx context.Context, conn N.PacketConn, 
 	metadata.Destination = destination
 	h.logger.InfoContext(ctx, "inbound packet connection from ", metadata.Source)
 	userID, _ := auth.UserFromContext[int](ctx)
-	if userName := h.userNameList[userID]; userName != "" {
-		metadata.User = userName
-		h.logger.InfoContext(ctx, "[", userName, "] inbound packet connection to ", metadata.Destination)
+	h.userLock.RLock()
+	userCount := len(h.userNameList)
+	userNme := ""
+	if userID < userCount {
+		userNme = h.userNameList[userID]
+	}
+	h.userLock.RUnlock()
+	if userNme != "" {
+		metadata.User = userNme
+		h.logger.InfoContext(ctx, "[", userNme, "] inbound packet connection to ", metadata.Destination)
 	} else {
 		h.logger.InfoContext(ctx, "inbound packet connection to ", metadata.Destination)
 	}

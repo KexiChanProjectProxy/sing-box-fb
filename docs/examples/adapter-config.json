@@ -1,0 +1,14 @@
+{
+  "panel_base_url": "https://panel.example.com",
+  "node_id": "node-1",
+  "node_token": "n_tok_placeholder",
+  "state_path": "/var/lib/sing-box-adapter/state.json",
+  "generated_config_path": "/var/lib/sing-box-adapter/generated-config.json",
+  "http_timeout": "30s",
+  "poll_interval_bounds": {
+    "min_seconds": 30,
+    "max_seconds": 300
+  },
+  "log_level": "info",
+  "insecure": false
+}

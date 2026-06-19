@@ -647,3 +647,16 @@ func (s *Box) Endpoint() adapter.EndpointManager {
 func (s *Box) LogFactory() log.Factory {
 	return s.logFactory
 }
+
+// ReplaceInboundUsers replaces the managed user set for an inbound by tag.
+func (s *Box) ReplaceInboundUsers(tag string, users []adapter.ManagedUser) error {
+	inbound, loaded := s.Inbound().Get(tag)
+	if !loaded {
+		return adapter.ErrInboundNotFoundTag(tag)
+	}
+	managedInbound, ok := inbound.(adapter.ManagedUserInbound)
+	if !ok {
+		return adapter.ErrInboundNotManagedTag(tag)
+	}
+	return managedInbound.ReplaceUsers(users)
+}

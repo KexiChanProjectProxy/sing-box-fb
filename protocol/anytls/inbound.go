@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"strings"
+	"sync"
 
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/adapter/inbound"
@@ -28,13 +29,17 @@ func RegisterInbound(registry *inbound.Registry) {
 	inbound.Register[option.AnyTLSInboundOptions](registry, C.TypeAnyTLS, NewInbound)
 }
 
+var _ adapter.ManagedUserInbound = (*Inbound)(nil)
+
 type Inbound struct {
 	inbound.Adapter
-	tlsConfig tls.ServerConfig
-	router    adapter.ConnectionRouterEx
-	logger    logger.ContextLogger
-	listener  *listener.Listener
-	service   *anytls.Service
+	tlsConfig    tls.ServerConfig
+	router       adapter.ConnectionRouterEx
+	logger       logger.ContextLogger
+	listener     *listener.Listener
+	service      *anytls.Service
+	userLock     sync.RWMutex
+	managedNames map[string]string // userID -> display name
 }
 
 func NewInbound(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.AnyTLSInboundOptions) (adapter.Inbound, error) {
@@ -96,6 +101,31 @@ func (h *Inbound) Close() error {
 	return common.Close(h.listener, h.tlsConfig)
 }
 
+// ReplaceUsers replaces the entire managed user set.
+// It implements adapter.ManagedUserInbound.
+func (h *Inbound) ReplaceUsers(users []adapter.ManagedUser) error {
+	anyUsers := make([]anytls.User, len(users))
+	names := make(map[string]string, len(users))
+	for i, u := range users {
+		anyUsers[i] = anytls.User{
+			Name:     u.UserID,
+			Password: u.Credential.Password,
+		}
+		displayName := u.Name
+		if displayName == "" {
+			displayName = u.UserID
+		}
+		names[u.UserID] = displayName
+	}
+	if h.service != nil {
+		h.service.UpdateUsers(anyUsers)
+	}
+	h.userLock.Lock()
+	h.managedNames = names
+	h.userLock.Unlock()
+	return nil
+}
+
 func (h *Inbound) NewConnection(ctx context.Context, conn net.Conn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) {
 	if h.tlsConfig != nil {
 		tlsConn, err := tls.ServerHandshake(ctx, conn, h.tlsConfig)
@@ -125,8 +155,15 @@ func (h *inboundHandler) NewConnectionEx(ctx context.Context, conn net.Conn, sou
 	metadata.Source = source
 	metadata.Destination = destination.Unwrap()
 	if userName, _ := auth.UserFromContext[string](ctx); userName != "" {
-		metadata.User = userName
-		h.logger.InfoContext(ctx, "[", userName, "] inbound connection to ", metadata.Destination)
+		h.userLock.RLock()
+		displayName, hasManaged := h.managedNames[userName]
+		h.userLock.RUnlock()
+		if hasManaged {
+			metadata.User = displayName
+		} else {
+			metadata.User = userName
+		}
+		h.logger.InfoContext(ctx, "[", metadata.User, "] inbound connection to ", metadata.Destination)
 	} else {
 		h.logger.InfoContext(ctx, "inbound connection to ", metadata.Destination)
 	}

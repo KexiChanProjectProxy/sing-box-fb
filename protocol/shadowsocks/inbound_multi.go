@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/sagernet/sing-box/adapter"
@@ -31,6 +32,7 @@ import (
 var (
 	_ adapter.TCPInjectableInbound = (*MultiInbound)(nil)
 	_ adapter.ManagedSSMServer     = (*MultiInbound)(nil)
+	_ adapter.ManagedUserInbound   = (*MultiInbound)(nil)
 )
 
 type MultiInbound struct {
@@ -42,6 +44,7 @@ type MultiInbound struct {
 	service  shadowsocks.MultiService[int]
 	users    []option.ShadowsocksUser
 	tracker  adapter.SSMTracker
+	userLock sync.RWMutex
 }
 
 func newMultiInbound(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.ShadowsocksInboundOptions) (*MultiInbound, error) {
@@ -122,6 +125,37 @@ func (h *MultiInbound) SetTracker(tracker adapter.SSMTracker) {
 	h.tracker = tracker
 }
 
+// ReplaceUsers replaces the entire managed user set.
+// It implements adapter.ManagedUserInbound.
+func (h *MultiInbound) ReplaceUsers(users []adapter.ManagedUser) error {
+	names := make([]string, len(users))
+	passwords := make([]string, len(users))
+	for i, u := range users {
+		if u.Name != "" {
+			names[i] = u.Name
+		} else {
+			names[i] = u.UserID
+		}
+		passwords[i] = u.Credential.Password
+	}
+	if h.service != nil {
+		err := h.service.UpdateUsersWithPasswords(common.MapIndexed(names, func(index int, _ string) int {
+			return index
+		}), passwords)
+		if err != nil {
+			return err
+		}
+	}
+	h.userLock.Lock()
+	h.users = common.Map(names, func(name string) option.ShadowsocksUser {
+		return option.ShadowsocksUser{
+			Name: name,
+		}
+	})
+	h.userLock.Unlock()
+	return nil
+}
+
 func (h *MultiInbound) UpdateUsers(users []string, uPSKs []string) error {
 	err := h.service.UpdateUsersWithPasswords(common.MapIndexed(users, func(index int, user string) int {
 		return index
@@ -163,7 +197,13 @@ func (h *MultiInbound) newConnection(ctx context.Context, conn net.Conn, metadat
 	if !loaded {
 		return os.ErrInvalid
 	}
-	user := h.users[userIndex].Name
+	h.userLock.RLock()
+	userCount := len(h.users)
+	var user string
+	if userIndex < userCount {
+		user = h.users[userIndex].Name
+	}
+	h.userLock.RUnlock()
 	if user == "" {
 		user = F.ToString(userIndex)
 	} else {
@@ -186,7 +226,13 @@ func (h *MultiInbound) newPacketConnection(ctx context.Context, conn N.PacketCon
 	if !loaded {
 		return os.ErrInvalid
 	}
-	user := h.users[userIndex].Name
+	h.userLock.RLock()
+	userCount := len(h.users)
+	var user string
+	if userIndex < userCount {
+		user = h.users[userIndex].Name
+	}
+	h.userLock.RUnlock()
 	if user == "" {
 		user = F.ToString(userIndex)
 	} else {
