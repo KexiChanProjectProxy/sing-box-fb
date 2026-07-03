@@ -10,13 +10,13 @@ import (
 func TestPollInbound_acceptsSnapshotWithoutNodeID_whenInboundMatchesAppliedConfig(t *testing.T) {
 	// Given
 	p, fetcher, replacer, store := newTestPoller()
-	fetcher.snapshot = makeSnapshot("u-rev-1", testConfigRev, "", testInboundID, "shadowsocks", []contract.User{
+	fetcher.snapshot = makeSnapshot("u-rev-1", testConfigRev, "", testInboundID, "hysteria2", []contract.User{
 		passwordUser("u1", "alice", "pass1"),
 	})
 	fetcher.etag = "etag-ss"
 
 	// When
-	err := p.PollInbound(context.Background(), testInboundID, makeManagedInbound("shadowsocks", contract.ApplyOnUserHotReloadUsers), testConfigRev)
+	err := p.PollInbound(context.Background(), testInboundID, makeManagedInbound("hysteria2", contract.ApplyOnUserHotReloadUsers), testConfigRev)
 
 	// Then
 	if err != nil {

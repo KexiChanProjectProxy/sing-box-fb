@@ -168,7 +168,7 @@ func TestPollInbound_200_AnyTLS(t *testing.T) {
 }
 
 func TestPollInbound_200_Shadowsocks(t *testing.T) {
-	p, fetcher, replacer, _ := newTestPoller()
+	p, fetcher, replacer, store := newTestPoller()
 	fetcher.snapshot = makeSnapshot("u-rev-1", testConfigRev, testNodeID, testInboundID, "shadowsocks", []contract.User{
 		passwordUser("u1", "alice", "pass1"),
 		passwordUser("u2", "bob", "pass2"),
@@ -180,8 +180,39 @@ func TestPollInbound_200_Shadowsocks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(replacer.users) != 3 {
-		t.Fatalf("expected 3 users, got %d", len(replacer.users))
+	if fetcher.called {
+		t.Fatal("FetchUsers must not be called for Shadowsocks single-user mode")
+	}
+	if replacer.called {
+		t.Fatal("ReplaceInboundUsers must not be called for Shadowsocks single-user mode")
+	}
+	ib := inboundState(store, testInboundID)
+	if ib.UserLoadStatus != string(contract.UserLoadStatusOK) {
+		t.Fatalf("status = %q, want %q", ib.UserLoadStatus, contract.UserLoadStatusOK)
+	}
+}
+
+func TestPollInbound_ShadowsocksSingleUser_skipsManagedUserReplacement_whenPolicyNone(t *testing.T) {
+	// Given
+	p, fetcher, replacer, store := newTestPoller()
+	managedInbound := makeManagedInbound("shadowsocks", contract.ApplyOnUserNone)
+
+	// When
+	err := p.PollInbound(context.Background(), testInboundID, managedInbound, testConfigRev)
+
+	// Then
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fetcher.called {
+		t.Fatal("FetchUsers must not be called for single-user Shadowsocks")
+	}
+	if replacer.called {
+		t.Fatal("ReplaceInboundUsers must not be called for single-user Shadowsocks")
+	}
+	ib := inboundState(store, testInboundID)
+	if ib.UserLoadStatus != string(contract.UserLoadStatusOK) {
+		t.Fatalf("status = %q, want %q", ib.UserLoadStatus, contract.UserLoadStatusOK)
 	}
 }
 

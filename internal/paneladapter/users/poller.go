@@ -109,6 +109,12 @@ func (p *Poller) PollInbound(ctx context.Context, inboundID string, managedInbou
 		return nil
 	}
 
+	if managedInbound.UserApplyPolicy == contract.ApplyOnUserNone || managedInbound.Protocol == contract.ProtocolShadowsocks {
+		p.setInboundStatus(inboundID, string(contract.UserLoadStatusOK))
+		p.logger.DebugContext(ctx, "single-user inbound skips managed user replacement for ", inboundID)
+		return nil
+	}
+
 	// Step 3: Check apply policy — only hot_reload_users is supported in v1.
 	if managedInbound.UserApplyPolicy != contract.ApplyOnUserHotReloadUsers {
 		p.setInboundStatus(inboundID, string(contract.UserLoadStatusApplyFailed))
