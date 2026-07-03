@@ -454,7 +454,7 @@ func (c *Client) ReportTraffic(ctx context.Context, report *contract.TrafficRepo
 	}
 
 	switch resp.StatusCode {
-	case http.StatusOK, http.StatusAccepted, http.StatusNoContent:
+	case http.StatusOK, http.StatusCreated, http.StatusAccepted, http.StatusNoContent:
 		_, _ = readAndClose(resp)
 		return nil
 
@@ -492,7 +492,7 @@ func (c *Client) SendHeartbeat(ctx context.Context, heartbeat *contract.Heartbea
 	}
 
 	switch resp.StatusCode {
-	case http.StatusOK, http.StatusAccepted, http.StatusNoContent:
+	case http.StatusOK, http.StatusCreated, http.StatusAccepted, http.StatusNoContent:
 		_, _ = readAndClose(resp)
 		return nil
 

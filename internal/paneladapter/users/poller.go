@@ -198,7 +198,7 @@ func (p *Poller) handleFetchError(ctx context.Context, inboundID string, err err
 func (p *Poller) validateSnapshot(snap *contract.UserSnapshot, inboundID string, managedInbound contract.ManagedInbound, configRevision string) error {
 	nodeID := p.store.State().Config.NodeID
 
-	if snap.NodeID != nodeID {
+	if snap.NodeID != "" && snap.NodeID != nodeID {
 		return E.New("node_id mismatch: got ", snap.NodeID, ", want ", nodeID)
 	}
 	if snap.InboundID != inboundID {

@@ -21,6 +21,7 @@ import (
 	"github.com/sagernet/sing-box/option"
 
 	E "github.com/sagernet/sing/common/exceptions"
+	commonjson "github.com/sagernet/sing/common/json"
 )
 
 // ---------------------------------------------------------------------------
@@ -256,7 +257,7 @@ func (m *Manager) applyConfigLocked(ctx context.Context, cfg *contract.Configura
 
 	// Unmarshal into option.Options.
 	var options option.Options
-	if err := json.Unmarshal(stripped, &options); err != nil {
+	if err := commonjson.UnmarshalContext(include.Context(ctx), stripped, &options); err != nil {
 		return E.Cause(err, "unmarshal sing-box config template")
 	}
 
@@ -426,9 +427,9 @@ func stripManagedInboundUsers(cfg *contract.ConfigurationResponse) (json.RawMess
 	}
 
 	// Collect managed inbound tags for lookup.
-	managedTags := make(map[string]bool, len(cfg.ManagedInbounds))
+	managedTags := make(map[string]string, len(cfg.ManagedInbounds))
 	for _, ib := range cfg.ManagedInbounds {
-		managedTags[ib.Tag] = true
+		managedTags[ib.Tag] = ib.Protocol
 	}
 
 	// Get the inbounds array.
@@ -463,16 +464,20 @@ func stripManagedInboundUsers(cfg *contract.ConfigurationResponse) (json.RawMess
 			continue
 		}
 
-		if managedTags[tag] {
+		protocol, managed := managedTags[tag]
+		if managed {
+			if protocol == "shadowsocks" {
+				ib["managed"] = json.RawMessage(`true`)
+			}
 			if _, hasUsers := ib["users"]; hasUsers {
 				ib["users"] = emptyUsers
-				modifiedRaw, err := json.Marshal(ib)
-				if err != nil {
-					return nil, E.Cause(err, "re-marshal inbound with stripped users")
-				}
-				inbounds[i] = modifiedRaw
-				modified = true
 			}
+			modifiedRaw, err := json.Marshal(ib)
+			if err != nil {
+				return nil, E.Cause(err, "re-marshal inbound with stripped users")
+			}
+			inbounds[i] = modifiedRaw
+			modified = true
 		}
 	}
 
