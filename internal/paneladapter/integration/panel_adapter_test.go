@@ -420,7 +420,6 @@ func makeValidConfigurationResponse(revision string) *contract.ConfigurationResp
 				"listen_port": 8445,
 				"method":      "aes-256-gcm",
 				"password":    "REDACTED_SERVER_PASS",
-				"users":       []any{},
 			},
 		},
 		"outbounds": []any{
@@ -464,7 +463,7 @@ func makeValidConfigurationResponse(revision string) *contract.ConfigurationResp
 				InboundID:       inboundIDSS,
 				Tag:             "ss-in",
 				Protocol:        "shadowsocks",
-				UserApplyPolicy: contract.ApplyOnUserHotReloadUsers,
+				UserApplyPolicy: contract.ApplyOnUserNone,
 			},
 		},
 		SingBoxConfigTemplate: templateJSON,
@@ -491,6 +490,19 @@ func makeUserSnapshot(inboundID, protocol, configRev, userRev string, userCount 
 		InboundID:             inboundID,
 		Protocol:              protocol,
 		Users:                 users,
+	}
+}
+
+func managedInboundFromState(ibState state.InboundState) contract.ManagedInbound {
+	policy := contract.ApplyOnUserHotReloadUsers
+	if ibState.Protocol == contract.ProtocolShadowsocks {
+		policy = contract.ApplyOnUserNone
+	}
+	return contract.ManagedInbound{
+		InboundID:       ibState.InboundID,
+		Tag:             ibState.Tag,
+		Protocol:        ibState.Protocol,
+		UserApplyPolicy: policy,
 	}
 }
 
@@ -789,12 +801,7 @@ func TestPanelAdapter_InitialUserFetch(t *testing.T) {
 		if !contract.IsSupportedProtocol(ibState.Protocol) {
 			continue
 		}
-		mi := contract.ManagedInbound{
-			InboundID:       ibState.InboundID,
-			Tag:             ibState.Tag,
-			Protocol:        ibState.Protocol,
-			UserApplyPolicy: contract.ApplyOnUserHotReloadUsers,
-		}
+		mi := managedInboundFromState(ibState)
 		err := env.poller.PollInbound(env.ctx, inboundID, mi, configRev)
 		require.NoError(t, err, "PollInbound for %s should succeed", inboundID)
 	}
@@ -812,8 +819,8 @@ func TestPanelAdapter_InitialUserFetch(t *testing.T) {
 	require.Equal(t, string(contract.UserLoadStatusOK), at.UserLoadStatus)
 
 	ss := st.Inbounds[inboundIDSS]
-	require.Equal(t, "user-ss-v1", ss.UserRevision)
-	require.Equal(t, 3, ss.UserCount)
+	require.Empty(t, ss.UserRevision)
+	require.Equal(t, 0, ss.UserCount)
 	require.Equal(t, string(contract.UserLoadStatusOK), ss.UserLoadStatus)
 }
 
@@ -832,12 +839,7 @@ func TestPanelAdapter_ETag304Polling(t *testing.T) {
 		if !contract.IsSupportedProtocol(ibState.Protocol) {
 			continue
 		}
-		mi := contract.ManagedInbound{
-			InboundID:       ibState.InboundID,
-			Tag:             ibState.Tag,
-			Protocol:        ibState.Protocol,
-			UserApplyPolicy: contract.ApplyOnUserHotReloadUsers,
-		}
+		mi := managedInboundFromState(ibState)
 		err := env.poller.PollInbound(env.ctx, inboundID, mi, configRev)
 		require.NoError(t, err)
 	}
@@ -849,12 +851,7 @@ func TestPanelAdapter_ETag304Polling(t *testing.T) {
 		if !contract.IsSupportedProtocol(ibState.Protocol) {
 			continue
 		}
-		mi := contract.ManagedInbound{
-			InboundID:       ibState.InboundID,
-			Tag:             ibState.Tag,
-			Protocol:        ibState.Protocol,
-			UserApplyPolicy: contract.ApplyOnUserHotReloadUsers,
-		}
+		mi := managedInboundFromState(ibState)
 		err := env.poller.PollInbound(env.ctx, inboundID, mi, configRev)
 		require.NoError(t, err, "304 poll should succeed with no error")
 	}
@@ -880,12 +877,7 @@ func TestPanelAdapter_HotUserReplacement(t *testing.T) {
 		if !contract.IsSupportedProtocol(ibState.Protocol) {
 			continue
 		}
-		mi := contract.ManagedInbound{
-			InboundID:       ibState.InboundID,
-			Tag:             ibState.Tag,
-			Protocol:        ibState.Protocol,
-			UserApplyPolicy: contract.ApplyOnUserHotReloadUsers,
-		}
+		mi := managedInboundFromState(ibState)
 		err := env.poller.PollInbound(env.ctx, inboundID, mi, configRev)
 		require.NoError(t, err)
 	}
@@ -1039,12 +1031,7 @@ func TestPanelAdapter_HeartbeatAfterUserPoll(t *testing.T) {
 		if !contract.IsSupportedProtocol(ibState.Protocol) {
 			continue
 		}
-		mi := contract.ManagedInbound{
-			InboundID:       ibState.InboundID,
-			Tag:             ibState.Tag,
-			Protocol:        ibState.Protocol,
-			UserApplyPolicy: contract.ApplyOnUserHotReloadUsers,
-		}
+		mi := managedInboundFromState(ibState)
 		err := env.poller.PollInbound(env.ctx, inboundID, mi, configRev)
 		require.NoError(t, err)
 	}
@@ -1060,6 +1047,10 @@ func TestPanelAdapter_HeartbeatAfterUserPoll(t *testing.T) {
 	for _, ib := range hb.Inbounds {
 		require.Equal(t, string(contract.UserLoadStatusOK), string(ib.UserLoadStatus),
 			"inbound %s should be OK after user poll", ib.InboundID)
+		if ib.InboundID == inboundIDSS {
+			require.Empty(t, ib.AppliedUserRevision, "single-user Shadowsocks should not poll user revisions")
+			continue
+		}
 		require.NotEmpty(t, ib.AppliedUserRevision, "inbound %s should have user revision", ib.InboundID)
 	}
 }
@@ -1086,18 +1077,16 @@ func TestPanelAdapter_FailClosedInitialUserFetch(t *testing.T) {
 		if !contract.IsSupportedProtocol(ibState.Protocol) {
 			continue
 		}
-		mi := contract.ManagedInbound{
-			InboundID:       ibState.InboundID,
-			Tag:             ibState.Tag,
-			Protocol:        ibState.Protocol,
-			UserApplyPolicy: contract.ApplyOnUserHotReloadUsers,
+		if ibState.Protocol == contract.ProtocolShadowsocks {
+			continue
 		}
+		mi := managedInboundFromState(ibState)
 		err := env.poller.PollInbound(env.ctx, inboundID, mi, configRev)
 		require.Error(t, err, "PollInbound should fail when panel returns 503")
 	}
 
 	st := env.store.State()
-	for _, ibID := range []string{inboundIDHy2, inboundIDAnyTLS, inboundIDSS} {
+	for _, ibID := range []string{inboundIDHy2, inboundIDAnyTLS} {
 		require.Equal(t, string(contract.UserLoadStatusEmptyInitialLoad), st.Inbounds[ibID].UserLoadStatus,
 			"inbound %s should be empty_initial_load after failed initial fetch", ibID)
 	}
@@ -1116,12 +1105,7 @@ func TestPanelAdapter_StaleSubsequentUserFetch(t *testing.T) {
 		if !contract.IsSupportedProtocol(ibState.Protocol) {
 			continue
 		}
-		mi := contract.ManagedInbound{
-			InboundID:       ibState.InboundID,
-			Tag:             ibState.Tag,
-			Protocol:        ibState.Protocol,
-			UserApplyPolicy: contract.ApplyOnUserHotReloadUsers,
-		}
+		mi := managedInboundFromState(ibState)
 		err := env.poller.PollInbound(env.ctx, inboundID, mi, configRev)
 		require.NoError(t, err)
 	}
@@ -1216,12 +1200,7 @@ func TestPanelAdapter_OnlySpecPaths(t *testing.T) {
 		if !contract.IsSupportedProtocol(ibState.Protocol) {
 			continue
 		}
-		mi := contract.ManagedInbound{
-			InboundID:       ibState.InboundID,
-			Tag:             ibState.Tag,
-			Protocol:        ibState.Protocol,
-			UserApplyPolicy: contract.ApplyOnUserHotReloadUsers,
-		}
+		mi := managedInboundFromState(ibState)
 		_ = env.poller.PollInbound(env.ctx, inboundID, mi, configRev)
 	}
 
@@ -1245,12 +1224,7 @@ func TestPanelAdapter_NoTokenInURL(t *testing.T) {
 		if !contract.IsSupportedProtocol(ibState.Protocol) {
 			continue
 		}
-		mi := contract.ManagedInbound{
-			InboundID:       ibState.InboundID,
-			Tag:             ibState.Tag,
-			Protocol:        ibState.Protocol,
-			UserApplyPolicy: contract.ApplyOnUserHotReloadUsers,
-		}
+		mi := managedInboundFromState(ibState)
 		_ = env.poller.PollInbound(env.ctx, inboundID, mi, configRev)
 	}
 
@@ -1287,12 +1261,7 @@ func TestPanelAdapter_RedactedTranscript(t *testing.T) {
 		if !contract.IsSupportedProtocol(ibState.Protocol) {
 			continue
 		}
-		mi := contract.ManagedInbound{
-			InboundID:       ibState.InboundID,
-			Tag:             ibState.Tag,
-			Protocol:        ibState.Protocol,
-			UserApplyPolicy: contract.ApplyOnUserHotReloadUsers,
-		}
+		mi := managedInboundFromState(ibState)
 		_ = env.poller.PollInbound(env.ctx, inboundID, mi, configRev)
 	}
 
@@ -1317,12 +1286,7 @@ func TestPanelAdapter_FullLifecycle(t *testing.T) {
 		if !contract.IsSupportedProtocol(ibState.Protocol) {
 			continue
 		}
-		mi := contract.ManagedInbound{
-			InboundID:       ibState.InboundID,
-			Tag:             ibState.Tag,
-			Protocol:        ibState.Protocol,
-			UserApplyPolicy: contract.ApplyOnUserHotReloadUsers,
-		}
+		mi := managedInboundFromState(ibState)
 		err := env.poller.PollInbound(env.ctx, inboundID, mi, configRev)
 		require.NoError(t, err)
 	}
@@ -1352,19 +1316,14 @@ func TestPanelAdapter_FullLifecycle(t *testing.T) {
 		if !contract.IsSupportedProtocol(ibState.Protocol) {
 			continue
 		}
-		mi := contract.ManagedInbound{
-			InboundID:       ibState.InboundID,
-			Tag:             ibState.Tag,
-			Protocol:        ibState.Protocol,
-			UserApplyPolicy: contract.ApplyOnUserHotReloadUsers,
-		}
+		mi := managedInboundFromState(ibState)
 		err := env.poller.PollInbound(env.ctx, inboundID, mi, configRev)
 		require.NoError(t, err)
 	}
 	st = env.store.State()
 	require.Equal(t, 4, st.Inbounds[inboundIDHy2].UserCount)
 	require.Equal(t, 2, st.Inbounds[inboundIDAnyTLS].UserCount)
-	require.Equal(t, 1, st.Inbounds[inboundIDSS].UserCount)
+	require.Equal(t, 0, st.Inbounds[inboundIDSS].UserCount)
 
 	// Step 5: Traffic + heartbeat.
 	env.reporter.SetConfigRevision(configRev)

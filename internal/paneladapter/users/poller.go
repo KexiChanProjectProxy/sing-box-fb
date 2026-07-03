@@ -109,7 +109,7 @@ func (p *Poller) PollInbound(ctx context.Context, inboundID string, managedInbou
 		return nil
 	}
 
-	if managedInbound.UserApplyPolicy == contract.ApplyOnUserNone || managedInbound.Protocol == contract.ProtocolShadowsocks {
+	if managedInbound.UserApplyPolicy == contract.ApplyOnUserNone {
 		p.setInboundStatus(inboundID, string(contract.UserLoadStatusOK))
 		p.logger.DebugContext(ctx, "single-user inbound skips managed user replacement for ", inboundID)
 		return nil

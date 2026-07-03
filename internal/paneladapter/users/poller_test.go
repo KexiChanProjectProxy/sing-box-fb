@@ -168,7 +168,7 @@ func TestPollInbound_200_AnyTLS(t *testing.T) {
 }
 
 func TestPollInbound_200_Shadowsocks(t *testing.T) {
-	p, fetcher, replacer, store := newTestPoller()
+	p, fetcher, replacer, _ := newTestPoller()
 	fetcher.snapshot = makeSnapshot("u-rev-1", testConfigRev, testNodeID, testInboundID, "shadowsocks", []contract.User{
 		passwordUser("u1", "alice", "pass1"),
 		passwordUser("u2", "bob", "pass2"),
@@ -180,15 +180,14 @@ func TestPollInbound_200_Shadowsocks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if fetcher.called {
-		t.Fatal("FetchUsers must not be called for Shadowsocks single-user mode")
+	if !fetcher.called {
+		t.Fatal("FetchUsers must be called for Shadowsocks hot_reload_users policy")
 	}
-	if replacer.called {
-		t.Fatal("ReplaceInboundUsers must not be called for Shadowsocks single-user mode")
+	if !replacer.called {
+		t.Fatal("ReplaceInboundUsers must be called for Shadowsocks hot_reload_users policy")
 	}
-	ib := inboundState(store, testInboundID)
-	if ib.UserLoadStatus != string(contract.UserLoadStatusOK) {
-		t.Fatalf("status = %q, want %q", ib.UserLoadStatus, contract.UserLoadStatusOK)
+	if len(replacer.users) != 3 {
+		t.Fatalf("expected 3 users, got %d", len(replacer.users))
 	}
 }
 
