@@ -261,9 +261,18 @@ func (m *Manager) applyConfigLocked(ctx context.Context, cfg *contract.Configura
 		return E.Cause(err, "unmarshal sing-box config template")
 	}
 
-	// Preserve the old instance in case the new one fails.
 	oldInstance := m.instance
 	oldCancel := m.cancel
+	m.instance = nil
+	m.cancel = nil
+	if oldCancel != nil {
+		oldCancel()
+	}
+	if oldInstance != nil {
+		if closeErr := oldInstance.Close(); closeErr != nil {
+			m.logger.WarnContext(ctx, "close old box instance before replacement: ", closeErr)
+		}
+	}
 
 	// Create a new context for the new Box.
 	boxCtx, boxCancel := context.WithCancel(ctx)
@@ -281,16 +290,6 @@ func (m *Manager) applyConfigLocked(ctx context.Context, cfg *contract.Configura
 	// Success: swap in the new instance.
 	m.instance = newInstance
 	m.cancel = boxCancel
-
-	// Close the old instance after the new one is running.
-	if oldInstance != nil {
-		if oldCancel != nil {
-			oldCancel()
-		}
-		if closeErr := oldInstance.Close(); closeErr != nil {
-			m.logger.WarnContext(ctx, "close old box instance: ", closeErr)
-		}
-	}
 
 	// Update state with applied config and inbound metadata.
 	m.updateStateApplied(cfg, etag, unsupportedInbounds)

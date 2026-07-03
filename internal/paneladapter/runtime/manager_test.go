@@ -116,11 +116,15 @@ type recordingFactory struct {
 	createErr error
 	callCount int
 	lastOpts  option.Options
+	events    *[]string
 }
 
 func (r *recordingFactory) Create(ctx context.Context, options option.Options) (*box.Box, error) {
 	r.callCount++
 	r.lastOpts = options
+	if r.events != nil {
+		*r.events = append(*r.events, "create")
+	}
 	if r.createErr != nil {
 		return nil, r.createErr
 	}
@@ -624,6 +628,43 @@ func TestPollConfiguration_RecreateInstance_CallsFactory(t *testing.T) {
 	}
 	if recorder.callCount != 1 {
 		t.Errorf("expected 1 factory call, got %d", recorder.callCount)
+	}
+}
+
+func TestPollConfiguration_RecreateInstance_CancelsOldRuntimeBeforeCreate(t *testing.T) {
+	cfg := validTestConfig("rev-2", contract.ApplyOnConfigRecreateInstance, nil)
+	fetcher := func(ctx context.Context, etag string) (*contract.ConfigurationResponse, string, error) {
+		return cfg, "etag-2", nil
+	}
+
+	statePath := filepath.Join(t.TempDir(), "state.json")
+	store, _ := state.NewStore(statePath)
+	store.SetState(&state.State{
+		Version:  state.CurrentVersion,
+		Inbounds: map[string]state.InboundState{},
+		Config:   state.ConfigState{ETag: "etag-1", Revision: "rev-1", NodeID: "node-1"},
+	})
+	store.SaveIfChanged()
+
+	events := []string{}
+	tracker := traffic.NewTracker(map[string]string{})
+	fakeClient := &fakeClient{fetcher: fetcher}
+	logFactory := log.NewNOPFactory()
+	recorder := &recordingFactory{createErr: errors.New("test: no real box"), events: &events}
+
+	m, err := NewManager(fakeClient, store, tracker, logFactory, WithBoxFactory(recorder))
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	m.cancel = func() { events = append(events, "cancel") }
+
+	_ = m.PollConfiguration(context.Background())
+
+	if len(events) < 2 {
+		t.Fatalf("expected cancel and create events, got %v", events)
+	}
+	if events[0] != "cancel" || events[1] != "create" {
+		t.Fatalf("events = %v, want cancel before create", events)
 	}
 }
 
