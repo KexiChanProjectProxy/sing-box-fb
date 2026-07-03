@@ -16,13 +16,19 @@ import (
 // Supported protocol allow-list (v1)
 // ---------------------------------------------------------------------------
 
+const (
+	ProtocolHysteria2   = "hysteria2"
+	ProtocolAnyTLS      = "anytls"
+	ProtocolShadowsocks = "shadowsocks"
+)
+
 // SupportedProtocols lists the inbound protocols the adapter can apply users to.
 // Unknown managed_inbounds[].protocol values are retained as unsupported metadata
 // (heartbeat reports unsupported_protocol) but never receive user-apply calls.
 var SupportedProtocols = map[string]bool{
-	"hysteria2":   true,
-	"anytls":      true,
-	"shadowsocks": true,
+	ProtocolHysteria2:   true,
+	ProtocolAnyTLS:      true,
+	ProtocolShadowsocks: true,
 }
 
 // IsSupportedProtocol returns true if the protocol is in the v1 allow-list.
@@ -57,6 +63,7 @@ var validOnConfigurationChange = map[string]bool{
 // Valid OnUserChange values.
 const (
 	ApplyOnUserHotReloadUsers   = "hot_reload_users"
+	ApplyOnUserNone             = "none"
 	ApplyOnUserRestartProcess   = "restart_process"
 	ApplyOnUserRecreateInstance = "recreate_instance"
 )
