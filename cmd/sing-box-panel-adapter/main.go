@@ -146,8 +146,7 @@ func runAdapter() error {
 
 	logger.Info("bootstrap complete, revision=", curState.Config.Revision)
 
-	// Get poll intervals from the configuration response.
-	pollIntervals := getPollIntervals(panelClient, ctx, logger)
+	startupConfig, pollIntervals := getStartupConfiguration(panelClient, ctx, logger)
 
 	// 9. Create user poller.
 	boxInstance := manager.GetBox()
@@ -200,16 +199,15 @@ func runAdapter() error {
 		})
 	}()
 
-	for inboundID, ibState := range curState.Inbounds {
-		if !contract.IsSupportedProtocol(ibState.Protocol) {
+	managedInbounds := startupConfig.ManagedInbounds
+	if len(managedInbounds) == 0 {
+		managedInbounds = managedInboundsFromState(curState)
+	}
+	for _, managedInbound := range managedInbounds {
+		if !contract.IsSupportedProtocol(managedInbound.Protocol) {
 			continue
 		}
-		managedInbound := contract.ManagedInbound{
-			InboundID:       ibState.InboundID,
-			Tag:             ibState.Tag,
-			Protocol:        ibState.Protocol,
-			UserApplyPolicy: contract.ApplyOnUserHotReloadUsers,
-		}
+		inboundID := managedInbound.InboundID
 		wg.Add(1)
 		go func(inboundID string, mi contract.ManagedInbound) {
 			defer wg.Done()
@@ -385,28 +383,40 @@ func sendHeartbeat(
 // getPollIntervals fetches the configuration from the panel to obtain poll
 // intervals. Since Bootstrap already fetched once, we try to use the
 // manager's cached config. Falls back to sensible defaults.
-func getPollIntervals(panelClient *client.Client, ctx context.Context, logger log.ContextLogger) contract.PollIntervals {
+func getStartupConfiguration(panelClient *client.Client, ctx context.Context, logger log.ContextLogger) (*contract.ConfigurationResponse, contract.PollIntervals) {
 	cfg, _, err := panelClient.FetchConfiguration(ctx, "")
 	if err != nil {
 		logger.Warn("fetch poll intervals failed, using defaults: ", err)
-		return contract.PollIntervals{
-			ConfigurationSeconds: 60,
-			UsersSeconds:         60,
-			TrafficSeconds:       60,
-			HeartbeatSeconds:     60,
-		}
+		return &contract.ConfigurationResponse{}, defaultPollIntervals()
 	}
 	if cfg.PollIntervals.ConfigurationSeconds <= 0 ||
 		cfg.PollIntervals.UsersSeconds <= 0 ||
 		cfg.PollIntervals.TrafficSeconds <= 0 ||
 		cfg.PollIntervals.HeartbeatSeconds <= 0 {
 		logger.Warn("panel returned invalid poll intervals, using defaults")
-		return contract.PollIntervals{
-			ConfigurationSeconds: 60,
-			UsersSeconds:         60,
-			TrafficSeconds:       60,
-			HeartbeatSeconds:     60,
-		}
+		return cfg, defaultPollIntervals()
 	}
-	return cfg.PollIntervals
+	return cfg, cfg.PollIntervals
+}
+
+func defaultPollIntervals() contract.PollIntervals {
+	return contract.PollIntervals{
+		ConfigurationSeconds: 60,
+		UsersSeconds:         60,
+		TrafficSeconds:       60,
+		HeartbeatSeconds:     60,
+	}
+}
+
+func managedInboundsFromState(curState *state.State) []contract.ManagedInbound {
+	managedInbounds := make([]contract.ManagedInbound, 0, len(curState.Inbounds))
+	for _, ibState := range curState.Inbounds {
+		managedInbounds = append(managedInbounds, contract.ManagedInbound{
+			InboundID:       ibState.InboundID,
+			Tag:             ibState.Tag,
+			Protocol:        ibState.Protocol,
+			UserApplyPolicy: contract.ApplyOnUserHotReloadUsers,
+		})
+	}
+	return managedInbounds
 }
