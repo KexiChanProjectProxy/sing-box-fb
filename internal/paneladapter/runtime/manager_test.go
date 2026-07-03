@@ -300,22 +300,26 @@ func TestStripManagedInboundUsers_StripsMatchingTags(t *testing.T) {
 		t.Fatalf("unmarshal inbounds: %v", err)
 	}
 
-	// First two should have empty users.
-	for i, tag := range []string{"managed-in", "also-managed"} {
-		var tagStr string
-		if err := json.Unmarshal(inbounds[i]["tag"], &tagStr); err != nil {
-			t.Fatalf("inbound[%d] tag: %v", i, err)
-		}
-		if tagStr != tag {
-			t.Errorf("inbound[%d]: expected tag %q, got %q", i, tag, tagStr)
-		}
-		var users []interface{}
-		if err := json.Unmarshal(inbounds[i]["users"], &users); err != nil {
-			t.Fatalf("inbound[%d] users: %v", i, err)
-		}
-		if len(users) != 0 {
-			t.Errorf("inbound[%d] (%s): expected empty users, got %d", i, tag, len(users))
-		}
+	var tagStr string
+	if err := json.Unmarshal(inbounds[0]["tag"], &tagStr); err != nil {
+		t.Fatalf("inbound[0] tag: %v", err)
+	}
+	if tagStr != "managed-in" {
+		t.Errorf("inbound[0]: expected tag %q, got %q", "managed-in", tagStr)
+	}
+	var managedUsers []interface{}
+	if err := json.Unmarshal(inbounds[0]["users"], &managedUsers); err != nil {
+		t.Fatalf("inbound[0] users: %v", err)
+	}
+	if len(managedUsers) != 0 {
+		t.Errorf("inbound[0] (managed-in): expected empty users, got %d", len(managedUsers))
+	}
+
+	if _, hasUsers := inbounds[1]["users"]; hasUsers {
+		t.Fatal("shadowsocks single-user inbound must not include users")
+	}
+	if _, hasManaged := inbounds[1]["managed"]; hasManaged {
+		t.Fatal("shadowsocks single-user inbound must not set managed")
 	}
 
 	// Third inbound (unmanaged) should keep its users.
@@ -325,6 +329,61 @@ func TestStripManagedInboundUsers_StripsMatchingTags(t *testing.T) {
 	}
 	if len(users) != 1 {
 		t.Errorf("unmanaged inbound: expected 1 user, got %d", len(users))
+	}
+}
+
+func TestStripManagedInboundUsers_keepsShadowsocksSingleUserInbound_whenPolicyNone(t *testing.T) {
+	// Given
+	managedInbounds := []contract.ManagedInbound{
+		{InboundID: "ib-1", Tag: "ss-in", Protocol: "shadowsocks", UserApplyPolicy: contract.ApplyOnUserNone},
+	}
+	template := map[string]interface{}{
+		"inbounds": []interface{}{
+			map[string]interface{}{
+				"type":        "shadowsocks",
+				"tag":         "ss-in",
+				"method":      "2022-blake3-aes-128-gcm",
+				"password":    "single-user-secret",
+				"listen_port": 8388,
+			},
+		},
+	}
+	templateBytes, _ := json.Marshal(template)
+	cfg := &contract.ConfigurationResponse{
+		Revision:              "rev-1",
+		APIVersion:            "v1",
+		NodeID:                "node-1",
+		ManagedInbounds:       managedInbounds,
+		SingBoxConfigTemplate: templateBytes,
+	}
+
+	// When
+	stripped, err := stripManagedInboundUsers(cfg)
+
+	// Then
+	if err != nil {
+		t.Fatalf("stripManagedInboundUsers: %v", err)
+	}
+	var tmpl map[string]json.RawMessage
+	if err := json.Unmarshal(stripped, &tmpl); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	var inbounds []map[string]json.RawMessage
+	if err := json.Unmarshal(tmpl["inbounds"], &inbounds); err != nil {
+		t.Fatalf("unmarshal inbounds: %v", err)
+	}
+	if _, hasManaged := inbounds[0]["managed"]; hasManaged {
+		t.Fatal("single-user Shadowsocks inbound must not set managed")
+	}
+	if _, hasUsers := inbounds[0]["users"]; hasUsers {
+		t.Fatal("single-user Shadowsocks inbound must not include users")
+	}
+	var password string
+	if err := json.Unmarshal(inbounds[0]["password"], &password); err != nil {
+		t.Fatalf("unmarshal password: %v", err)
+	}
+	if password != "single-user-secret" {
+		t.Fatalf("password = %q, want preserved single-user password", password)
 	}
 }
 

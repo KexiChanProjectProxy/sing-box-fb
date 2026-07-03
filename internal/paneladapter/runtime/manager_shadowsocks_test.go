@@ -84,7 +84,10 @@ func TestApplyConfigLocked_preservesShadowsocks2022Method_whenTemplateDecoded(t 
 	if shadowsocksOptions.Method != "2022-blake3-aes-128-gcm" {
 		t.Fatalf("expected method to be preserved, got %q", shadowsocksOptions.Method)
 	}
-	if !shadowsocksOptions.Managed {
-		t.Fatal("expected managed shadowsocks inbound")
+	if shadowsocksOptions.Managed {
+		t.Fatal("single-user shadowsocks inbound must not be managed")
+	}
+	if shadowsocksOptions.Password != "test-password" {
+		t.Fatal("expected single-user password to be preserved")
 	}
 }

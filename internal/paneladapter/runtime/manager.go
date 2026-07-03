@@ -427,9 +427,9 @@ func stripManagedInboundUsers(cfg *contract.ConfigurationResponse) (json.RawMess
 	}
 
 	// Collect managed inbound tags for lookup.
-	managedTags := make(map[string]string, len(cfg.ManagedInbounds))
+	managedTags := make(map[string]contract.ManagedInbound, len(cfg.ManagedInbounds))
 	for _, ib := range cfg.ManagedInbounds {
-		managedTags[ib.Tag] = ib.Protocol
+		managedTags[ib.Tag] = ib
 	}
 
 	// Get the inbounds array.
@@ -464,12 +464,12 @@ func stripManagedInboundUsers(cfg *contract.ConfigurationResponse) (json.RawMess
 			continue
 		}
 
-		protocol, managed := managedTags[tag]
+		managedInbound, managed := managedTags[tag]
 		if managed {
-			if protocol == "shadowsocks" {
-				ib["managed"] = json.RawMessage(`true`)
-			}
-			if _, hasUsers := ib["users"]; hasUsers {
+			if managedInbound.UserApplyPolicy == contract.ApplyOnUserNone || managedInbound.Protocol == contract.ProtocolShadowsocks {
+				delete(ib, "managed")
+				delete(ib, "users")
+			} else if _, hasUsers := ib["users"]; hasUsers {
 				ib["users"] = emptyUsers
 			}
 			modifiedRaw, err := json.Marshal(ib)
