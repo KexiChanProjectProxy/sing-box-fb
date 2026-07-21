@@ -114,14 +114,14 @@ func TestBuildInbounds_StatusOK(t *testing.T) {
 		t.Fatalf("expected 1 inbound, got %d", len(inbounds))
 	}
 	ib := inbounds[0]
-	if ib.UserLoadStatus != contract.UserLoadStatusOK {
-		t.Errorf("expected status ok, got %q", ib.UserLoadStatus)
+	if ib.Status != contract.UserLoadStatusOK {
+		t.Errorf("expected status ok, got %q", ib.Status)
 	}
-	if ib.UserCount != 5 {
-		t.Errorf("expected user count 5, got %d", ib.UserCount)
+	if ib.CurrentUserCount != 5 {
+		t.Errorf("expected user count 5, got %d", ib.CurrentUserCount)
 	}
-	if ib.AppliedUserRevision != "u-rev-1" {
-		t.Errorf("expected applied_user_revision u-rev-1, got %q", ib.AppliedUserRevision)
+	if ib.Tag != "in-hy2" {
+		t.Errorf("expected tag in-hy2, got %q", ib.Tag)
 	}
 }
 
@@ -137,8 +137,8 @@ func TestBuildInbounds_StatusStale(t *testing.T) {
 	h := NewHeartbeat(nil, newTestStore(st), testNodeID, constant.Version, "", WithLogger(logger.NOP()))
 	inbounds := h.buildInbounds(st)
 
-	if inbounds[0].UserLoadStatus != contract.UserLoadStatusStale {
-		t.Errorf("expected status stale, got %q", inbounds[0].UserLoadStatus)
+	if inbounds[0].Status != contract.UserLoadStatusStale {
+		t.Errorf("expected status stale, got %q", inbounds[0].Status)
 	}
 }
 
@@ -154,8 +154,8 @@ func TestBuildInbounds_StatusEmptyInitialLoad(t *testing.T) {
 	h := NewHeartbeat(nil, newTestStore(st), testNodeID, constant.Version, "", WithLogger(logger.NOP()))
 	inbounds := h.buildInbounds(st)
 
-	if inbounds[0].UserLoadStatus != contract.UserLoadStatusEmptyInitialLoad {
-		t.Errorf("expected status empty_initial_load, got %q", inbounds[0].UserLoadStatus)
+	if inbounds[0].Status != contract.UserLoadStatusEmptyInitialLoad {
+		t.Errorf("expected status empty_initial_load, got %q", inbounds[0].Status)
 	}
 }
 
@@ -171,8 +171,8 @@ func TestBuildInbounds_StatusRevisionConflict(t *testing.T) {
 	h := NewHeartbeat(nil, newTestStore(st), testNodeID, constant.Version, "", WithLogger(logger.NOP()))
 	inbounds := h.buildInbounds(st)
 
-	if inbounds[0].UserLoadStatus != contract.UserLoadStatusRevisionConflict {
-		t.Errorf("expected status revision_conflict, got %q", inbounds[0].UserLoadStatus)
+	if inbounds[0].Status != contract.UserLoadStatusRevisionConflict {
+		t.Errorf("expected status revision_conflict, got %q", inbounds[0].Status)
 	}
 }
 
@@ -188,8 +188,8 @@ func TestBuildInbounds_StatusApplyFailed(t *testing.T) {
 	h := NewHeartbeat(nil, newTestStore(st), testNodeID, constant.Version, "", WithLogger(logger.NOP()))
 	inbounds := h.buildInbounds(st)
 
-	if inbounds[0].UserLoadStatus != contract.UserLoadStatusApplyFailed {
-		t.Errorf("expected status apply_failed, got %q", inbounds[0].UserLoadStatus)
+	if inbounds[0].Status != contract.UserLoadStatusApplyFailed {
+		t.Errorf("expected status apply_failed, got %q", inbounds[0].Status)
 	}
 }
 
@@ -211,8 +211,8 @@ func TestBuildInbounds_UnknownProtocol_UnsupportedStatus(t *testing.T) {
 	h := NewHeartbeat(nil, newTestStore(st), testNodeID, constant.Version, "", WithLogger(logger.NOP()))
 	inbounds := h.buildInbounds(st)
 
-	if inbounds[0].UserLoadStatus != contract.UserLoadStatusUnsupportedProto {
-		t.Errorf("expected unsupported_protocol for unknown protocol, got %q", inbounds[0].UserLoadStatus)
+	if inbounds[0].Status != contract.UserLoadStatusUnsupportedProto {
+		t.Errorf("expected unsupported_protocol for unknown protocol, got %q", inbounds[0].Status)
 	}
 	if inbounds[0].Protocol != "vmess" {
 		t.Errorf("expected protocol vmess preserved, got %q", inbounds[0].Protocol)
@@ -231,8 +231,8 @@ func TestBuildInbounds_UnknownProtocol_EmptyStatus(t *testing.T) {
 	h := NewHeartbeat(nil, newTestStore(st), testNodeID, constant.Version, "", WithLogger(logger.NOP()))
 	inbounds := h.buildInbounds(st)
 
-	if inbounds[0].UserLoadStatus != contract.UserLoadStatusUnsupportedProto {
-		t.Errorf("expected unsupported_protocol for unknown protocol with empty status, got %q", inbounds[0].UserLoadStatus)
+	if inbounds[0].Status != contract.UserLoadStatusUnsupportedProto {
+		t.Errorf("expected unsupported_protocol for unknown protocol with empty status, got %q", inbounds[0].Status)
 	}
 }
 
@@ -240,16 +240,19 @@ func TestBuildInbounds_SupportedProtocols(t *testing.T) {
 	st := defaultState()
 	st.Inbounds["ib-hy2"] = state.InboundState{
 		InboundID:      "ib-hy2",
+		Tag:            "ib-hy2",
 		Protocol:       "hysteria2",
 		UserLoadStatus: string(contract.UserLoadStatusOK),
 	}
 	st.Inbounds["ib-ss"] = state.InboundState{
 		InboundID:      "ib-ss",
+		Tag:            "ib-ss",
 		Protocol:       "shadowsocks",
 		UserLoadStatus: string(contract.UserLoadStatusOK),
 	}
 	st.Inbounds["ib-at"] = state.InboundState{
 		InboundID:      "ib-at",
+		Tag:            "ib-at",
 		Protocol:       "anytls",
 		UserLoadStatus: string(contract.UserLoadStatusOK),
 	}
@@ -261,8 +264,8 @@ func TestBuildInbounds_SupportedProtocols(t *testing.T) {
 		t.Fatalf("expected 3 inbounds, got %d", len(inbounds))
 	}
 	for _, ib := range inbounds {
-		if ib.UserLoadStatus != contract.UserLoadStatusOK {
-			t.Errorf("protocol %q: expected ok, got %q", ib.Protocol, ib.UserLoadStatus)
+		if ib.Status != contract.UserLoadStatusOK {
+			t.Errorf("protocol %q: expected ok, got %q", ib.Protocol, ib.Status)
 		}
 	}
 }
@@ -590,17 +593,49 @@ func TestSendHeartbeat_Success(t *testing.T) {
 	if hb.PendingConfigurationRevision != nil {
 		t.Errorf("expected nil pending_configuration_revision, got %q", *hb.PendingConfigurationRevision)
 	}
-	if len(hb.Inbounds) != 1 {
-		t.Fatalf("expected 1 inbound, got %d", len(hb.Inbounds))
+	if len(hb.InboundStatuses) != 1 {
+		t.Fatalf("expected 1 inbound status, got %d", len(hb.InboundStatuses))
 	}
-	if hb.Inbounds[0].UserLoadStatus != contract.UserLoadStatusOK {
-		t.Errorf("expected ok status, got %q", hb.Inbounds[0].UserLoadStatus)
+	if hb.InboundStatuses[0].Status != contract.UserLoadStatusOK {
+		t.Errorf("expected ok status, got %q", hb.InboundStatuses[0].Status)
+	}
+	if hb.InboundStatuses[0].Tag != "in-hy2" {
+		t.Errorf("expected tag in-hy2, got %q", hb.InboundStatuses[0].Tag)
 	}
 	if hb.ObservedAt.IsZero() {
 		t.Error("expected non-zero observed_at")
 	}
 	if hb.Runtime == nil {
 		t.Error("expected runtime metrics")
+	}
+
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(handler.body, &raw); err != nil {
+		t.Fatalf("unmarshal raw heartbeat: %v", err)
+	}
+	if _, ok := raw["inbound_statuses"]; !ok {
+		t.Fatal("heartbeat JSON is missing inbound_statuses")
+	}
+	if _, ok := raw["inbounds"]; ok {
+		t.Fatal("heartbeat JSON must not contain legacy inbounds")
+	}
+
+	var inboundStatuses []map[string]json.RawMessage
+	if err := json.Unmarshal(raw["inbound_statuses"], &inboundStatuses); err != nil {
+		t.Fatalf("unmarshal raw inbound_statuses: %v", err)
+	}
+	if len(inboundStatuses) != 1 {
+		t.Fatalf("expected one raw inbound status, got %d", len(inboundStatuses))
+	}
+	for _, legacyField := range []string{
+		"inbound_id",
+		"applied_user_revision",
+		"user_load_status",
+		"user_count",
+	} {
+		if _, ok := inboundStatuses[0][legacyField]; ok {
+			t.Errorf("heartbeat inbound status must not contain legacy field %q", legacyField)
+		}
 	}
 }
 
@@ -673,6 +708,7 @@ func TestSendHeartbeat_MultipleInbounds(t *testing.T) {
 	st.Config.Revision = "rev-1"
 	st.Inbounds["ib-hy2"] = state.InboundState{
 		InboundID:      "ib-hy2",
+		Tag:            "ib-hy2",
 		Protocol:       "hysteria2",
 		UserLoadStatus: string(contract.UserLoadStatusOK),
 		UserCount:      10,
@@ -680,6 +716,7 @@ func TestSendHeartbeat_MultipleInbounds(t *testing.T) {
 	}
 	st.Inbounds["ib-ss"] = state.InboundState{
 		InboundID:      "ib-ss",
+		Tag:            "ib-ss",
 		Protocol:       "shadowsocks",
 		UserLoadStatus: string(contract.UserLoadStatusStale),
 		UserCount:      5,
@@ -687,6 +724,7 @@ func TestSendHeartbeat_MultipleInbounds(t *testing.T) {
 	}
 	st.Inbounds["ib-vmess"] = state.InboundState{
 		InboundID:      "ib-vmess",
+		Tag:            "ib-vmess",
 		Protocol:       "vmess",                           // unsupported
 		UserLoadStatus: string(contract.UserLoadStatusOK), // overridden to unsupported_protocol
 		UserCount:      0,
@@ -714,14 +752,14 @@ func TestSendHeartbeat_MultipleInbounds(t *testing.T) {
 		t.Fatalf("unmarshal heartbeat: %v", err)
 	}
 
-	if len(hb.Inbounds) != 3 {
-		t.Fatalf("expected 3 inbounds, got %d", len(hb.Inbounds))
+	if len(hb.InboundStatuses) != 3 {
+		t.Fatalf("expected 3 inbound statuses, got %d", len(hb.InboundStatuses))
 	}
 
 	// Find each inbound and verify status
 	statusMap := make(map[string]contract.UserLoadStatus)
-	for _, ib := range hb.Inbounds {
-		statusMap[ib.InboundID] = ib.UserLoadStatus
+	for _, ib := range hb.InboundStatuses {
+		statusMap[ib.Tag] = ib.Status
 	}
 	if statusMap["ib-hy2"] != contract.UserLoadStatusOK {
 		t.Errorf("ib-hy2: expected ok, got %q", statusMap["ib-hy2"])
@@ -775,17 +813,20 @@ func TestBuildInbounds_AllInboundsIncluded(t *testing.T) {
 	// Mix of statuses: ok, empty (never polled), unsupported
 	st.Inbounds["ib-ok"] = state.InboundState{
 		InboundID:      "ib-ok",
+		Tag:            "ib-ok",
 		Protocol:       "hysteria2",
 		UserLoadStatus: string(contract.UserLoadStatusOK),
 		UserCount:      5,
 	}
 	st.Inbounds["ib-empty"] = state.InboundState{
 		InboundID: "ib-empty",
+		Tag:       "ib-empty",
 		Protocol:  "shadowsocks",
 		// No UserLoadStatus — never polled
 	}
 	st.Inbounds["ib-unsupported"] = state.InboundState{
 		InboundID:      "ib-unsupported",
+		Tag:            "ib-unsupported",
 		Protocol:       "vless",                           // not supported
 		UserLoadStatus: string(contract.UserLoadStatusOK), // overridden
 	}
@@ -799,7 +840,7 @@ func TestBuildInbounds_AllInboundsIncluded(t *testing.T) {
 
 	statusMap := make(map[string]contract.UserLoadStatus)
 	for _, ib := range inbounds {
-		statusMap[ib.InboundID] = ib.UserLoadStatus
+		statusMap[ib.Tag] = ib.Status
 	}
 	if statusMap["ib-ok"] != contract.UserLoadStatusOK {
 		t.Errorf("ib-ok: expected ok, got %q", statusMap["ib-ok"])

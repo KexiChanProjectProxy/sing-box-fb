@@ -346,12 +346,22 @@ func sendHeartbeat(
 	// Build heartbeat inbounds from state.
 	inbounds := make([]contract.HeartbeatInbound, 0, len(st.Inbounds))
 	for _, ib := range st.Inbounds {
+		status := contract.UserLoadStatus(ib.UserLoadStatus)
+		tag := ib.Tag
+		if tag == "" {
+			tag = ib.InboundID
+		}
+		if status == "" {
+			status = contract.UserLoadStatusEmptyInitialLoad
+		}
+		if !contract.IsSupportedProtocol(ib.Protocol) {
+			status = contract.UserLoadStatusUnsupportedProto
+		}
 		inbounds = append(inbounds, contract.HeartbeatInbound{
-			InboundID:           ib.InboundID,
-			Protocol:            ib.Protocol,
-			AppliedUserRevision: ib.UserRevision,
-			UserCount:           ib.UserCount,
-			UserLoadStatus:      contract.UserLoadStatus(ib.UserLoadStatus),
+			Tag:              tag,
+			Protocol:         ib.Protocol,
+			Status:           status,
+			CurrentUserCount: ib.UserCount,
 		})
 	}
 
@@ -364,7 +374,7 @@ func sendHeartbeat(
 		SingBoxVersion:               C.Version,
 		AdapterVersion:               C.Version,
 		AppliedConfigurationRevision: st.Config.Revision,
-		Inbounds:                     inbounds,
+		InboundStatuses:              inbounds,
 		Runtime:                      runtimeMetrics,
 	}
 

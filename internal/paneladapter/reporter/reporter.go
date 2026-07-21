@@ -135,16 +135,15 @@ func (r *Reporter) stageAndSend(ctx context.Context) error {
 
 	idempotencyKey := makeIdempotencyKey(r.nodeID, r.reportStartTime, bodyHash)
 
-	st := r.store.State().Clone()
-	st.PendingReports = append(st.PendingReports, state.PendingReport{
-		IdempotencyKey: idempotencyKey,
-		BodyHash:       bodyHash,
-		StartedAt:      r.reportStartTime,
-		EndedAt:        now,
-		RetryCount:     0,
-	})
-	r.store.SetState(st)
-	if err := r.store.Save(); err != nil {
+	if err := r.store.UpdateAndSave(func(st *state.State) {
+		st.PendingReports = append(st.PendingReports, state.PendingReport{
+			IdempotencyKey: idempotencyKey,
+			BodyHash:       bodyHash,
+			StartedAt:      r.reportStartTime,
+			EndedAt:        now,
+			RetryCount:     0,
+		})
+	}); err != nil {
 		return E.Cause(err, "persist pending report")
 	}
 
@@ -161,16 +160,15 @@ func (r *Reporter) stageAndSend(ctx context.Context) error {
 // retryPending re-sends the in-memory pending report with its
 // idempotency key.
 func (r *Reporter) retryPending(ctx context.Context) error {
-	st := r.store.State().Clone()
-	for i, pr := range st.PendingReports {
-		if pr.BodyHash == r.pendingHash && pr.StartedAt.Equal(r.pendingReport.StartedAt) {
-			pr.RetryCount++
-			st.PendingReports[i] = pr
-			break
+	if err := r.store.UpdateAndSave(func(st *state.State) {
+		for i, pr := range st.PendingReports {
+			if pr.BodyHash == r.pendingHash && pr.StartedAt.Equal(r.pendingReport.StartedAt) {
+				pr.RetryCount++
+				st.PendingReports[i] = pr
+				break
+			}
 		}
-	}
-	r.store.SetState(st)
-	if err := r.store.Save(); err != nil {
+	}); err != nil {
 		return E.Cause(err, "persist pending report retry count")
 	}
 
@@ -184,10 +182,9 @@ func (r *Reporter) sendAndFinalize(ctx context.Context, report *contract.Traffic
 		r.tracker.ConfirmAccepted()
 		r.tracker.ResetLiveCountersWhenJournaled()
 
-		st := r.store.State().Clone()
-		st.PendingReports = removePendingByHash(st.PendingReports, bodyHash, startedAt)
-		r.store.SetState(st)
-		if saveErr := r.store.Save(); saveErr != nil {
+		if saveErr := r.store.UpdateAndSave(func(st *state.State) {
+			st.PendingReports = removePendingByHash(st.PendingReports, bodyHash, startedAt)
+		}); saveErr != nil {
 			r.logger.ErrorContext(ctx, "reporter: failed to clear pending report after success: ", saveErr)
 		}
 
@@ -271,10 +268,9 @@ func (r *Reporter) Recovery(ctx context.Context) error {
 		remaining = append(remaining, pr)
 	}
 
-	st2 := r.store.State().Clone()
-	st2.PendingReports = remaining
-	r.store.SetState(st2)
-	if err := r.store.Save(); err != nil {
+	if err := r.store.UpdateAndSave(func(st *state.State) {
+		st.PendingReports = remaining
+	}); err != nil {
 		return E.Cause(err, "save state after recovery")
 	}
 

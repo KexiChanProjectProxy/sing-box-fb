@@ -104,20 +104,26 @@ func (p *Poller) PollInbound(ctx context.Context, inboundID string, managedInbou
 
 	// Step 2: Check if protocol is supported.
 	if !contract.IsSupportedProtocol(managedInbound.Protocol) {
-		p.setInboundStatus(inboundID, string(contract.UserLoadStatusUnsupportedProto))
+		if err := p.setInboundStatus(inboundID, string(contract.UserLoadStatusUnsupportedProto)); err != nil {
+			return E.Cause(err, "persist unsupported protocol status")
+		}
 		p.logger.DebugContext(ctx, "unsupported protocol for inbound ", inboundID, ": ", managedInbound.Protocol)
 		return nil
 	}
 
 	if managedInbound.UserApplyPolicy == contract.ApplyOnUserNone {
-		p.setInboundStatus(inboundID, string(contract.UserLoadStatusOK))
+		if err := p.setInboundStatus(inboundID, string(contract.UserLoadStatusOK)); err != nil {
+			return E.Cause(err, "persist single-user inbound status")
+		}
 		p.logger.DebugContext(ctx, "single-user inbound skips managed user replacement for ", inboundID)
 		return nil
 	}
 
 	// Step 3: Check apply policy — only hot_reload_users is supported in v1.
 	if managedInbound.UserApplyPolicy != contract.ApplyOnUserHotReloadUsers {
-		p.setInboundStatus(inboundID, string(contract.UserLoadStatusApplyFailed))
+		if err := p.setInboundStatus(inboundID, string(contract.UserLoadStatusApplyFailed)); err != nil {
+			return E.Cause(err, "persist unsupported user apply policy status")
+		}
 		p.logger.DebugContext(ctx, "unsupported user_apply_policy for inbound ", inboundID, ": ", managedInbound.UserApplyPolicy)
 		return E.New("unsupported user_apply_policy: ", managedInbound.UserApplyPolicy)
 	}
@@ -136,13 +142,17 @@ func (p *Poller) PollInbound(ctx context.Context, inboundID string, managedInbou
 	if err := p.validateSnapshot(snapshot, inboundID, managedInbound, configRevision); err != nil {
 		// Validation failure — check if it's a revision conflict.
 		if errors.Is(err, errRevisionConflict) {
-			p.setInboundStatus(inboundID, string(contract.UserLoadStatusRevisionConflict))
 			p.MarkConfigRefetch()
+			if persistErr := p.setInboundStatus(inboundID, string(contract.UserLoadStatusRevisionConflict)); persistErr != nil {
+				return E.Errors(err, E.Cause(persistErr, "persist revision conflict status"))
+			}
 			p.logger.WarnContext(ctx, "revision conflict for inbound ", inboundID, ": snapshot config_rev=", snapshot.ConfigurationRevision, " applied=", configRevision)
 			return err
 		}
 		// Other validation errors (node_id/inbound_id/protocol mismatch).
-		p.setInboundStatus(inboundID, string(contract.UserLoadStatusApplyFailed))
+		if persistErr := p.setInboundStatus(inboundID, string(contract.UserLoadStatusApplyFailed)); persistErr != nil {
+			return E.Errors(err, E.Cause(persistErr, "persist snapshot validation status"))
+		}
 		return err
 	}
 
@@ -151,13 +161,17 @@ func (p *Poller) PollInbound(ctx context.Context, inboundID string, managedInbou
 	tag := managedInbound.Tag
 
 	if err := p.box.ReplaceInboundUsers(tag, users); err != nil {
-		p.setInboundStatus(inboundID, string(contract.UserLoadStatusApplyFailed))
+		if persistErr := p.setInboundStatus(inboundID, string(contract.UserLoadStatusApplyFailed)); persistErr != nil {
+			return E.Errors(E.Cause(err, "replace inbound users"), E.Cause(persistErr, "persist user apply failure status"))
+		}
 		p.logger.WarnContext(ctx, "replace inbound users failed for ", tag, ": ", err)
 		return E.Cause(err, "replace inbound users")
 	}
 
 	// Success — update state.
-	p.updateInboundState(inboundID, newETag, snapshot.Revision, len(snapshot.Users), string(contract.UserLoadStatusOK))
+	if err := p.updateInboundState(inboundID, newETag, snapshot.Revision, len(snapshot.Users), string(contract.UserLoadStatusOK)); err != nil {
+		return E.Cause(err, "persist applied users")
+	}
 	p.logger.DebugContext(ctx, "applied ", len(snapshot.Users), " users to inbound ", tag)
 	return nil
 }
@@ -173,15 +187,19 @@ func (p *Poller) handleFetchError(ctx context.Context, inboundID string, err err
 	// Check for 304 NotModified first.
 	if errors.Is(err, client.ErrNotModified) {
 		// No change — status is ok.
-		p.setInboundStatus(inboundID, string(contract.UserLoadStatusOK))
+		if persistErr := p.setInboundStatus(inboundID, string(contract.UserLoadStatusOK)); persistErr != nil {
+			return E.Errors(err, E.Cause(persistErr, "persist not-modified status"))
+		}
 		return nil
 	}
 
 	// Check for 409 conflict.
 	var respErr *client.ResponseError
 	if errors.As(err, &respErr) && respErr.StatusCode == 409 {
-		p.setInboundStatus(inboundID, string(contract.UserLoadStatusRevisionConflict))
 		p.MarkConfigRefetch()
+		if persistErr := p.setInboundStatus(inboundID, string(contract.UserLoadStatusRevisionConflict)); persistErr != nil {
+			return E.Errors(err, E.Cause(persistErr, "persist revision conflict status"))
+		}
 		p.logger.WarnContext(ctx, "409 conflict for inbound ", inboundID)
 		return err
 	}
@@ -189,13 +207,17 @@ func (p *Poller) handleFetchError(ctx context.Context, inboundID string, err err
 	// Transport / 5xx / other retryable errors.
 	if hasPrev && prevRevision != "" {
 		// Subsequent load — keep old users, mark stale.
-		p.setInboundStatus(inboundID, string(contract.UserLoadStatusStale))
+		if persistErr := p.setInboundStatus(inboundID, string(contract.UserLoadStatusStale)); persistErr != nil {
+			return E.Errors(err, E.Cause(persistErr, "persist stale status"))
+		}
 		p.logger.WarnContext(ctx, "fetch users failed for inbound ", inboundID, " (stale): ", err)
 		return err
 	}
 
 	// Initial load failure — fail-closed.
-	p.setInboundStatus(inboundID, string(contract.UserLoadStatusEmptyInitialLoad))
+	if persistErr := p.setInboundStatus(inboundID, string(contract.UserLoadStatusEmptyInitialLoad)); persistErr != nil {
+		return E.Errors(err, E.Cause(persistErr, "persist initial load failure status"))
+	}
 	p.logger.WarnContext(ctx, "initial fetch users failed for inbound ", inboundID, " (empty_initial_load): ", err)
 	return err
 }
@@ -245,28 +267,28 @@ func convertUsers(snapshot *contract.UserSnapshot) []adapter.ManagedUser {
 }
 
 // setInboundStatus updates the UserLoadStatus for an inbound in the store.
-func (p *Poller) setInboundStatus(inboundID string, status string) {
-	st := p.store.State().Clone()
-	ib, ok := st.Inbounds[inboundID]
-	if !ok {
-		ib = state.InboundState{InboundID: inboundID}
-	}
-	ib.UserLoadStatus = status
-	st.Inbounds[inboundID] = ib
-	p.store.SetState(st)
+func (p *Poller) setInboundStatus(inboundID string, status string) error {
+	return p.store.UpdateAndSave(func(st *state.State) {
+		ib, ok := st.Inbounds[inboundID]
+		if !ok {
+			ib = state.InboundState{InboundID: inboundID}
+		}
+		ib.UserLoadStatus = status
+		st.Inbounds[inboundID] = ib
+	})
 }
 
 // updateInboundState updates the full inbound state after a successful apply.
-func (p *Poller) updateInboundState(inboundID, etag, revision string, userCount int, status string) {
-	st := p.store.State().Clone()
-	ib, ok := st.Inbounds[inboundID]
-	if !ok {
-		ib = state.InboundState{InboundID: inboundID}
-	}
-	ib.UserETag = etag
-	ib.UserRevision = revision
-	ib.UserCount = userCount
-	ib.UserLoadStatus = status
-	st.Inbounds[inboundID] = ib
-	p.store.SetState(st)
+func (p *Poller) updateInboundState(inboundID, etag, revision string, userCount int, status string) error {
+	return p.store.UpdateAndSave(func(st *state.State) {
+		ib, ok := st.Inbounds[inboundID]
+		if !ok {
+			ib = state.InboundState{InboundID: inboundID}
+		}
+		ib.UserETag = etag
+		ib.UserRevision = revision
+		ib.UserCount = userCount
+		ib.UserLoadStatus = status
+		st.Inbounds[inboundID] = ib
+	})
 }

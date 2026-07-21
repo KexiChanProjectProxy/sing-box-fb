@@ -3,6 +3,7 @@ package users
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"testing"
 
 	"github.com/sagernet/sing-box/adapter"
@@ -148,6 +149,64 @@ func TestPollInbound_200_Hysteria2(t *testing.T) {
 	}
 	if ib.UserLoadStatus != string(contract.UserLoadStatusOK) {
 		t.Errorf("status = %q, want %q", ib.UserLoadStatus, contract.UserLoadStatusOK)
+	}
+}
+
+func TestPollInbound_200_PersistsAppliedUserState(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	store, err := state.NewStore(path)
+	if err != nil {
+		t.Fatalf("create state store: %v", err)
+	}
+	if err := store.UpdateAndSave(func(st *state.State) {
+		st.Config.NodeID = testNodeID
+		st.Inbounds[testInboundID] = state.InboundState{
+			InboundID: testInboundID,
+			Tag:       testTag,
+			Protocol:  "hysteria2",
+		}
+	}); err != nil {
+		t.Fatalf("initialize state store: %v", err)
+	}
+
+	fetcher := &mockFetcher{
+		snapshot: makeSnapshot("u-rev-1", testConfigRev, testNodeID, testInboundID, "hysteria2", []contract.User{
+			passwordUser("u1", "alice", "pass1"),
+			passwordUser("u2", "bob", "pass2"),
+		}),
+		etag: "etag-v1",
+	}
+	replacer := &mockReplacer{}
+	poller := NewPoller(fetcher, store, replacer, logger.NOP())
+
+	if err := poller.PollInbound(
+		context.Background(),
+		testInboundID,
+		makeManagedInbound("hysteria2", contract.ApplyOnUserHotReloadUsers),
+		testConfigRev,
+	); err != nil {
+		t.Fatalf("poll inbound: %v", err)
+	}
+
+	reloaded, err := state.NewStore(path)
+	if err != nil {
+		t.Fatalf("reload state store: %v", err)
+	}
+	ib, ok := reloaded.State().Inbounds[testInboundID]
+	if !ok {
+		t.Fatal("persisted state is missing inbound")
+	}
+	if ib.UserLoadStatus != string(contract.UserLoadStatusOK) {
+		t.Errorf("persisted status = %q, want %q", ib.UserLoadStatus, contract.UserLoadStatusOK)
+	}
+	if ib.UserCount != 2 {
+		t.Errorf("persisted user_count = %d, want 2", ib.UserCount)
+	}
+	if ib.UserRevision != "u-rev-1" {
+		t.Errorf("persisted user_revision = %q, want %q", ib.UserRevision, "u-rev-1")
+	}
+	if ib.UserETag != "etag-v1" {
+		t.Errorf("persisted user_etag = %q, want %q", ib.UserETag, "etag-v1")
 	}
 }
 

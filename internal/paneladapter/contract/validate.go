@@ -230,9 +230,9 @@ func (h *Heartbeat) Validate() error {
 	if h.AppliedConfigurationRevision == "" {
 		return E.New("missing applied_configuration_revision")
 	}
-	for i, inbound := range h.Inbounds {
+	for i, inbound := range h.InboundStatuses {
 		if err := inbound.Validate(); err != nil {
-			return E.Cause(err, "inbounds[", i, "]")
+			return E.Cause(err, "inbound_statuses[", i, "]")
 		}
 	}
 	if h.Runtime != nil {
@@ -247,19 +247,22 @@ func (h *Heartbeat) Validate() error {
 // HeartbeatInbound validation
 // ---------------------------------------------------------------------------
 
-// Validate checks required fields and that user_load_status is a known enum.
+// Validate checks required fields and that status is a known enum.
 func (hi *HeartbeatInbound) Validate() error {
-	if hi.InboundID == "" {
-		return E.New("missing inbound_id")
+	if hi.Tag == "" {
+		return E.New("missing tag")
 	}
 	if hi.Protocol == "" {
 		return E.New("missing protocol")
 	}
-	if hi.UserLoadStatus == "" {
-		return E.New("missing user_load_status")
+	if hi.Status == "" {
+		return E.New("missing status")
 	}
-	if !ValidUserLoadStatuses[hi.UserLoadStatus] {
-		return E.New("unknown user_load_status: ", string(hi.UserLoadStatus))
+	if !ValidUserLoadStatuses[hi.Status] {
+		return E.New("unknown status: ", string(hi.Status))
+	}
+	if hi.CurrentUserCount < 0 {
+		return E.New("current_user_count must be non-negative, got: ", hi.CurrentUserCount)
 	}
 	return nil
 }

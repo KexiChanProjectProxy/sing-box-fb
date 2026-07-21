@@ -1001,17 +1001,17 @@ func TestPanelAdapter_HeartbeatReporting(t *testing.T) {
 	require.Equal(t, C.Version, hb.SingBoxVersion)
 	require.Equal(t, "test-adapter", hb.AdapterVersion)
 	require.False(t, hb.ObservedAt.IsZero())
-	require.Len(t, hb.Inbounds, 3)
+	require.Len(t, hb.InboundStatuses, 3)
 
 	inboundMap := make(map[string]contract.HeartbeatInbound)
-	for _, ib := range hb.Inbounds {
-		inboundMap[ib.InboundID] = ib
+	for _, ib := range hb.InboundStatuses {
+		inboundMap[ib.Tag] = ib
 	}
-	for _, ibID := range []string{inboundIDHy2, inboundIDAnyTLS, inboundIDSS} {
-		ib, ok := inboundMap[ibID]
-		require.True(t, ok, "inbound %s should be in heartbeat", ibID)
-		require.Equal(t, string(contract.UserLoadStatusEmptyInitialLoad), string(ib.UserLoadStatus),
-			"inbound %s should be empty_initial_load before user poll", ibID)
+	for _, tag := range []string{"hy2-in", "anytls-in", "ss-in"} {
+		ib, ok := inboundMap[tag]
+		require.True(t, ok, "inbound tag %s should be in heartbeat", tag)
+		require.Equal(t, string(contract.UserLoadStatusEmptyInitialLoad), string(ib.Status),
+			"inbound tag %s should be empty_initial_load before user poll", tag)
 	}
 
 	require.NotNil(t, hb.Runtime)
@@ -1044,14 +1044,9 @@ func TestPanelAdapter_HeartbeatAfterUserPoll(t *testing.T) {
 	require.Len(t, hbReqs, 1)
 
 	hb := hbReqs[0]
-	for _, ib := range hb.Inbounds {
-		require.Equal(t, string(contract.UserLoadStatusOK), string(ib.UserLoadStatus),
-			"inbound %s should be OK after user poll", ib.InboundID)
-		if ib.InboundID == inboundIDSS {
-			require.Empty(t, ib.AppliedUserRevision, "single-user Shadowsocks should not poll user revisions")
-			continue
-		}
-		require.NotEmpty(t, ib.AppliedUserRevision, "inbound %s should have user revision", ib.InboundID)
+	for _, ib := range hb.InboundStatuses {
+		require.Equal(t, string(contract.UserLoadStatusOK), string(ib.Status),
+			"inbound %s should be OK after user poll", ib.Tag)
 	}
 }
 
@@ -1335,8 +1330,8 @@ func TestPanelAdapter_FullLifecycle(t *testing.T) {
 	require.True(t, len(hbReqs) >= 1)
 	lastHB := hbReqs[len(hbReqs)-1]
 	require.Equal(t, "rev-updated-002", lastHB.AppliedConfigurationRevision)
-	for _, ib := range lastHB.Inbounds {
-		require.Equal(t, string(contract.UserLoadStatusOK), string(ib.UserLoadStatus), ib.InboundID)
+	for _, ib := range lastHB.InboundStatuses {
+		require.Equal(t, string(contract.UserLoadStatusOK), string(ib.Status), ib.Tag)
 	}
 
 	// Step 6: Global assertions.

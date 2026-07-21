@@ -129,7 +129,7 @@ func NewHeartbeat(
 //     - AdapterVersion: from option or "0.1.0" default
 //     - AppliedConfigurationRevision: from state
 //     - PendingConfigurationRevision: from state if config has unreconciled changes
-//     - Inbounds: iterate over state inbounds, map each to HeartbeatInbound
+//     - InboundStatuses: iterate over state inbounds, map each to HeartbeatInbound
 //     - Runtime: aggregate metrics from tracker (connections, uptime, memory)
 //  3. Call client.SendHeartbeat
 //  4. Log errors but don't fail (heartbeat is best-effort)
@@ -151,7 +151,7 @@ func (h *Heartbeat) SendHeartbeat(ctx context.Context) error {
 		AdapterVersion:               h.adapterVersion,
 		AppliedConfigurationRevision: st.Config.Revision,
 		PendingConfigurationRevision: pendingRev,
-		Inbounds:                     inbounds,
+		InboundStatuses:              inbounds,
 		Runtime:                      rtMetrics,
 	}
 
@@ -176,6 +176,10 @@ func (h *Heartbeat) buildInbounds(st *state.State) []contract.HeartbeatInbound {
 	inbounds := make([]contract.HeartbeatInbound, 0, len(st.Inbounds))
 	for _, ib := range st.Inbounds {
 		status := contract.UserLoadStatus(ib.UserLoadStatus)
+		tag := ib.Tag
+		if tag == "" {
+			tag = ib.InboundID
+		}
 
 		// If UserLoadStatus is empty (never polled), mark as empty_initial_load.
 		if status == "" {
@@ -188,11 +192,10 @@ func (h *Heartbeat) buildInbounds(st *state.State) []contract.HeartbeatInbound {
 		}
 
 		inbounds = append(inbounds, contract.HeartbeatInbound{
-			InboundID:           ib.InboundID,
-			Protocol:            ib.Protocol,
-			AppliedUserRevision: ib.UserRevision,
-			UserCount:           ib.UserCount,
-			UserLoadStatus:      status,
+			Tag:              tag,
+			Protocol:         ib.Protocol,
+			Status:           status,
+			CurrentUserCount: ib.UserCount,
 		})
 	}
 	return inbounds

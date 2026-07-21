@@ -147,13 +147,12 @@ If-None-Match: "cfg-0005"
   "sing_box_version": "1.12.0",
   "adapter_version": "0.1.0",
   "applied_configuration_revision": "cfg-0005",
-  "inbounds": [
+  "inbound_statuses": [
     {
-      "inbound_id": "hy2-main",
+      "tag": "hy2-in",
       "protocol": "hysteria2",
-      "applied_user_revision": "usr-hy2-0011",
-      "user_count": 1024,
-      "user_load_status": "ok"
+      "status": "ok",
+      "current_user_count": 1024
     }
   ],
   "runtime": {
@@ -729,12 +728,11 @@ curl -s -X POST -H "Authorization: Bearer $TOKEN" \
     "sing_box_version":"1.12.0",
     "adapter_version":"0.1.0",
     "applied_configuration_revision":"cfg-001",
-    "inbounds":[{
-      "inbound_id":"hy2-main",
+    "inbound_statuses":[{
+      "tag":"hy2-in",
       "protocol":"hysteria2",
-      "applied_user_revision":"usr-hy2-003",
-      "user_count":2,
-      "user_load_status":"ok"
+      "status":"ok",
+      "current_user_count":2
     }]
   }' \
   "$BASE/api/v1/nodes/$NODE/heartbeats"

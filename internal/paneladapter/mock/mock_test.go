@@ -698,8 +698,8 @@ func TestServer_Heartbeat_BodyDecodedAndStored(t *testing.T) {
 	if heartbeats[0].SingBoxVersion != "1.12.0" {
 		t.Errorf("expected sing_box_version 1.12.0, got %q", heartbeats[0].SingBoxVersion)
 	}
-	if len(heartbeats[0].Inbounds) != 1 {
-		t.Errorf("expected 1 inbound, got %d", len(heartbeats[0].Inbounds))
+	if len(heartbeats[0].InboundStatuses) != 1 {
+		t.Errorf("expected 1 inbound status, got %d", len(heartbeats[0].InboundStatuses))
 	}
 }
 
@@ -1079,7 +1079,7 @@ func TestServer_Heartbeat_ValidationFailureReturns400(t *testing.T) {
 		SingBoxVersion:               "", // Missing.
 		AdapterVersion:               "0.1.0",
 		AppliedConfigurationRevision: "rev-001",
-		Inbounds:                     []contract.HeartbeatInbound{},
+		InboundStatuses:              []contract.HeartbeatInbound{},
 	}
 	resp := doPOST(s, heartbeatPath(), hb)
 	defer resp.Body.Close()

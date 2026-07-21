@@ -396,6 +396,69 @@ func TestStore_ConcurrentAccess(t *testing.T) {
 	// Just verify no panic or data race occurred.
 }
 
+func TestStore_UpdateAndSaveConcurrentMutationsPreserveAllState(t *testing.T) {
+	path := testStatePath(t)
+	store, err := NewStore(path)
+	mustNoError(t, err)
+
+	start := make(chan struct{})
+	errs := make(chan error, 2)
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		<-start
+		errs <- store.UpdateAndSave(func(st *State) {
+			st.Inbounds["ib-1"] = InboundState{
+				InboundID:      "ib-1",
+				Tag:            "hy2-in",
+				Protocol:       "hysteria2",
+				UserETag:       "etag-1",
+				UserRevision:   "users-1",
+				UserLoadStatus: "ok",
+				UserCount:      2,
+			}
+		})
+	}()
+
+	go func() {
+		defer wg.Done()
+		<-start
+		errs <- store.UpdateAndSave(func(st *State) {
+			st.PendingReports = append(st.PendingReports, PendingReport{
+				IdempotencyKey: "report-1",
+				BodyHash:       "hash-1",
+				StartedAt:      time.Date(2026, 7, 21, 3, 0, 0, 0, time.UTC),
+				EndedAt:        time.Date(2026, 7, 21, 3, 1, 0, 0, time.UTC),
+			})
+		})
+	}()
+
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		mustNoError(t, err)
+	}
+
+	reloaded, err := NewStore(path)
+	mustNoError(t, err)
+	ib, ok := reloaded.State().Inbounds["ib-1"]
+	if !ok {
+		t.Fatal("concurrent pending report update overwrote inbound state")
+	}
+	if ib.UserCount != 2 || ib.UserRevision != "users-1" {
+		t.Fatalf("unexpected persisted inbound state: %+v", ib)
+	}
+	if len(reloaded.State().PendingReports) != 1 {
+		t.Fatalf("concurrent inbound update overwrote pending reports: %+v", reloaded.State().PendingReports)
+	}
+	if reloaded.State().PendingReports[0].IdempotencyKey != "report-1" {
+		t.Fatalf("unexpected persisted pending report: %+v", reloaded.State().PendingReports[0])
+	}
+}
+
 // ---------- Clone tests ----------
 
 func TestClone_DeepCopy(t *testing.T) {

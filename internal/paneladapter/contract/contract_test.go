@@ -92,20 +92,18 @@ func validHeartbeat() *Heartbeat {
 		AdapterVersion:               "0.1.0",
 		AppliedConfigurationRevision: "cfg-0005",
 		PendingConfigurationRevision: nil,
-		Inbounds: []HeartbeatInbound{
+		InboundStatuses: []HeartbeatInbound{
 			{
-				InboundID:           "hy2-main",
-				Protocol:            "hysteria2",
-				AppliedUserRevision: "usr-hy2-main-0011",
-				UserCount:           1024,
-				UserLoadStatus:      UserLoadStatusOK,
+				Tag:              "hy2-in",
+				Protocol:         "hysteria2",
+				CurrentUserCount: 1024,
+				Status:           UserLoadStatusOK,
 			},
 			{
-				InboundID:           "ss-main",
-				Protocol:            "shadowsocks",
-				AppliedUserRevision: "usr-ss-main-0042",
-				UserCount:           512,
-				UserLoadStatus:      UserLoadStatusStale,
+				Tag:              "ss-in",
+				Protocol:         "shadowsocks",
+				CurrentUserCount: 512,
+				Status:           UserLoadStatusStale,
 			},
 		},
 		Runtime: &HeartbeatRuntime{
@@ -547,20 +545,19 @@ func TestUserLoadStatus_AllValues(t *testing.T) {
 	}
 }
 
-func TestHeartbeatInbound_Validate_UnknownUserLoadStatus(t *testing.T) {
+func TestHeartbeatInbound_Validate_UnknownStatus(t *testing.T) {
 	hi := HeartbeatInbound{
-		InboundID:           "in",
-		Protocol:            "hysteria2",
-		AppliedUserRevision: "rev",
-		UserCount:           0,
-		UserLoadStatus:      UserLoadStatus("unknown_status"),
+		Tag:              "in",
+		Protocol:         "hysteria2",
+		CurrentUserCount: 0,
+		Status:           UserLoadStatus("unknown_status"),
 	}
 	err := hi.Validate()
 	if err == nil {
-		t.Fatal("expected error for unknown user_load_status")
+		t.Fatal("expected error for unknown status")
 	}
-	if !contains(err.Error(), "unknown user_load_status") {
-		t.Fatalf("error %q should contain 'unknown user_load_status'", err.Error())
+	if !contains(err.Error(), "unknown status") {
+		t.Fatalf("error %q should contain 'unknown status'", err.Error())
 	}
 }
 
@@ -570,9 +567,10 @@ func TestHeartbeatInbound_Validate_MissingFields(t *testing.T) {
 		hi      HeartbeatInbound
 		wantErr string
 	}{
-		{"missing inbound_id", HeartbeatInbound{InboundID: "", Protocol: "hysteria2", UserLoadStatus: UserLoadStatusOK}, "missing inbound_id"},
-		{"missing protocol", HeartbeatInbound{InboundID: "in", Protocol: "", UserLoadStatus: UserLoadStatusOK}, "missing protocol"},
-		{"missing user_load_status", HeartbeatInbound{InboundID: "in", Protocol: "hysteria2", UserLoadStatus: ""}, "missing user_load_status"},
+		{"missing tag", HeartbeatInbound{Tag: "", Protocol: "hysteria2", Status: UserLoadStatusOK}, "missing tag"},
+		{"missing protocol", HeartbeatInbound{Tag: "in", Protocol: "", Status: UserLoadStatusOK}, "missing protocol"},
+		{"missing status", HeartbeatInbound{Tag: "in", Protocol: "hysteria2", Status: ""}, "missing status"},
+		{"negative user count", HeartbeatInbound{Tag: "in", Protocol: "hysteria2", Status: UserLoadStatusOK, CurrentUserCount: -1}, "current_user_count"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

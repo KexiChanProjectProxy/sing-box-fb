@@ -109,13 +109,12 @@ func ValidHeartbeat(configRev string) *contract.Heartbeat {
 		SingBoxVersion:               "1.12.0",
 		AdapterVersion:               "0.1.0",
 		AppliedConfigurationRevision: configRev,
-		Inbounds: []contract.HeartbeatInbound{
+		InboundStatuses: []contract.HeartbeatInbound{
 			{
-				InboundID:           "inb-hy2",
-				Protocol:            "hysteria2",
-				AppliedUserRevision: "user-rev-001",
-				UserCount:           2,
-				UserLoadStatus:      contract.UserLoadStatusOK,
+				Tag:              "in-hysteria2",
+				Protocol:         "hysteria2",
+				CurrentUserCount: 2,
+				Status:           contract.UserLoadStatusOK,
 			},
 		},
 	}

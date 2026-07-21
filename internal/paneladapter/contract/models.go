@@ -176,17 +176,16 @@ type Heartbeat struct {
 	AdapterVersion               string             `json:"adapter_version"`
 	AppliedConfigurationRevision string             `json:"applied_configuration_revision"`
 	PendingConfigurationRevision *string            `json:"pending_configuration_revision,omitempty"`
-	Inbounds                     []HeartbeatInbound `json:"inbounds"`
+	InboundStatuses              []HeartbeatInbound `json:"inbound_statuses"`
 	Runtime                      *HeartbeatRuntime  `json:"runtime,omitempty"`
 }
 
 // HeartbeatInbound reports per-inbound status within a heartbeat.
 type HeartbeatInbound struct {
-	InboundID           string         `json:"inbound_id"`
-	Protocol            string         `json:"protocol"`
-	AppliedUserRevision string         `json:"applied_user_revision"`
-	UserCount           int            `json:"user_count"`
-	UserLoadStatus      UserLoadStatus `json:"user_load_status"`
+	Tag              string         `json:"tag"`
+	Protocol         string         `json:"protocol"`
+	Status           UserLoadStatus `json:"status"`
+	CurrentUserCount int            `json:"current_user_count"`
 }
 
 // HeartbeatRuntime contains optional runtime metrics.

@@ -304,28 +304,26 @@ func (m *Manager) applyConfigLocked(ctx context.Context, cfg *contract.Configura
 // recordPendingRevision records a new configuration revision as pending
 // without applying it. The pending revision will be reported in heartbeats.
 func (m *Manager) recordPendingRevision(cfg *contract.ConfigurationResponse, etag string) error {
-	s := m.store.State().Clone()
-	s.Config = state.ConfigState{
-		Revision: cfg.Revision,
-		ETag:     etag,
-		NodeID:   cfg.NodeID,
-	}
-
-	// Record inbound metadata but mark as pending (not yet applied).
-	for _, ib := range cfg.ManagedInbounds {
-		is := state.InboundState{
-			InboundID: ib.InboundID,
-			Tag:       ib.Tag,
-			Protocol:  ib.Protocol,
+	if err := m.store.UpdateAndSave(func(s *state.State) {
+		s.Config = state.ConfigState{
+			Revision: cfg.Revision,
+			ETag:     etag,
+			NodeID:   cfg.NodeID,
 		}
-		if !contract.IsSupportedProtocol(ib.Protocol) {
-			is.UserLoadStatus = string(contract.UserLoadStatusUnsupportedProto)
-		}
-		s.Inbounds[ib.InboundID] = is
-	}
 
-	m.store.SetState(s)
-	if err := m.store.SaveIfChanged(); err != nil {
+		// Record inbound metadata but mark as pending (not yet applied).
+		for _, ib := range cfg.ManagedInbounds {
+			is := state.InboundState{
+				InboundID: ib.InboundID,
+				Tag:       ib.Tag,
+				Protocol:  ib.Protocol,
+			}
+			if !contract.IsSupportedProtocol(ib.Protocol) {
+				is.UserLoadStatus = string(contract.UserLoadStatusUnsupportedProto)
+			}
+			s.Inbounds[ib.InboundID] = is
+		}
+	}); err != nil {
 		return E.Cause(err, "save pending revision state")
 	}
 
@@ -336,60 +334,56 @@ func (m *Manager) recordPendingRevision(cfg *contract.ConfigurationResponse, eta
 // updateStateApplied records the applied configuration revision, ETag,
 // and managed inbound metadata in the state store.
 func (m *Manager) updateStateApplied(cfg *contract.ConfigurationResponse, etag string, unsupported map[string]bool) {
-	s := m.store.State().Clone()
-	s.Config = state.ConfigState{
-		Revision: cfg.Revision,
-		ETag:     etag,
-		NodeID:   cfg.NodeID,
-	}
-
-	// Update per-inbound state.
-	for _, ib := range cfg.ManagedInbounds {
-		is := state.InboundState{
-			InboundID: ib.InboundID,
-			Tag:       ib.Tag,
-			Protocol:  ib.Protocol,
+	if err := m.store.UpdateAndSave(func(s *state.State) {
+		s.Config = state.ConfigState{
+			Revision: cfg.Revision,
+			ETag:     etag,
+			NodeID:   cfg.NodeID,
 		}
-		if unsupported[ib.InboundID] {
-			is.UserLoadStatus = string(contract.UserLoadStatusUnsupportedProto)
-		} else {
-			// Fail-closed: empty initial load until first user snapshot.
-			is.UserLoadStatus = string(contract.UserLoadStatusEmptyInitialLoad)
-		}
-		s.Inbounds[ib.InboundID] = is
-	}
 
-	m.store.SetState(s)
-	if err := m.store.SaveIfChanged(); err != nil {
+		// Update per-inbound state.
+		for _, ib := range cfg.ManagedInbounds {
+			is := state.InboundState{
+				InboundID: ib.InboundID,
+				Tag:       ib.Tag,
+				Protocol:  ib.Protocol,
+			}
+			if unsupported[ib.InboundID] {
+				is.UserLoadStatus = string(contract.UserLoadStatusUnsupportedProto)
+			} else {
+				// Fail-closed: empty initial load until first user snapshot.
+				is.UserLoadStatus = string(contract.UserLoadStatusEmptyInitialLoad)
+			}
+			s.Inbounds[ib.InboundID] = is
+		}
+	}); err != nil {
 		m.logger.Error("save state after apply: ", err)
 	}
 }
 
 // setInboundStatesApplyFailed marks all managed inbounds as apply_failed.
 func (m *Manager) setInboundStatesApplyFailed(cfg *contract.ConfigurationResponse) {
-	s := m.store.State().Clone()
-	s.Config = state.ConfigState{
-		Revision: cfg.Revision,
-		ETag:     "", // No ETag since apply failed
-		NodeID:   cfg.NodeID,
-	}
-
-	for _, ib := range cfg.ManagedInbounds {
-		is := state.InboundState{
-			InboundID: ib.InboundID,
-			Tag:       ib.Tag,
-			Protocol:  ib.Protocol,
+	if err := m.store.UpdateAndSave(func(s *state.State) {
+		s.Config = state.ConfigState{
+			Revision: cfg.Revision,
+			ETag:     "", // No ETag since apply failed
+			NodeID:   cfg.NodeID,
 		}
-		if !contract.IsSupportedProtocol(ib.Protocol) {
-			is.UserLoadStatus = string(contract.UserLoadStatusUnsupportedProto)
-		} else {
-			is.UserLoadStatus = string(contract.UserLoadStatusApplyFailed)
-		}
-		s.Inbounds[ib.InboundID] = is
-	}
 
-	m.store.SetState(s)
-	if err := m.store.SaveIfChanged(); err != nil {
+		for _, ib := range cfg.ManagedInbounds {
+			is := state.InboundState{
+				InboundID: ib.InboundID,
+				Tag:       ib.Tag,
+				Protocol:  ib.Protocol,
+			}
+			if !contract.IsSupportedProtocol(ib.Protocol) {
+				is.UserLoadStatus = string(contract.UserLoadStatusUnsupportedProto)
+			} else {
+				is.UserLoadStatus = string(contract.UserLoadStatusApplyFailed)
+			}
+			s.Inbounds[ib.InboundID] = is
+		}
+	}); err != nil {
 		m.logger.Error("save apply_failed state: ", err)
 	}
 }

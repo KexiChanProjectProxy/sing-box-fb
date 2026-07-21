@@ -173,6 +173,34 @@ func (s *Store) SaveIfChanged() error {
 	return nil
 }
 
+// UpdateAndSave applies a mutation to a cloned state while holding the store
+// lock, replaces the in-memory state, and persists it when changed.
+func (s *Store) UpdateAndSave(update func(*State)) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	next := s.state.Clone()
+	update(next)
+	s.state = next
+
+	if s.path == "" {
+		return nil
+	}
+
+	currentHash, err := next.computeHash()
+	if err != nil {
+		return err
+	}
+	if currentHash == s.lastHash {
+		return nil
+	}
+	if err := s.writeState(next); err != nil {
+		return err
+	}
+	s.lastHash = currentHash
+	return nil
+}
+
 // writeState performs the atomic write: temp file → fsync → rename.
 func (s *Store) writeState(st *State) error {
 	data, err := st.marshalJSON()
