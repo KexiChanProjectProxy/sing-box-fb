@@ -52,6 +52,7 @@ type InboundContext struct {
 	Source      M.Socksaddr
 	Destination M.Socksaddr
 	User        string
+	UserID      string
 	Outbound    string
 
 	// sniffer

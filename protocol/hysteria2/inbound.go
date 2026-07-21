@@ -42,6 +42,7 @@ type Inbound struct {
 	listener     *listener.Listener
 	tlsConfig    tls.ServerConfig
 	service      *hysteria2.Service[int]
+	userIDList   []string
 	userNameList []string
 	userLock     sync.RWMutex
 }
@@ -188,15 +189,18 @@ func NewInbound(ctx context.Context, router adapter.Router, logger log.ContextLo
 		return nil, err
 	}
 	userList := make([]int, 0, len(options.Users))
+	userIDList := make([]string, 0, len(options.Users))
 	userNameList := make([]string, 0, len(options.Users))
 	userPasswordList := make([]string, 0, len(options.Users))
 	for index, user := range options.Users {
 		userList = append(userList, index)
+		userIDList = append(userIDList, user.Name)
 		userNameList = append(userNameList, user.Name)
 		userPasswordList = append(userPasswordList, user.Password)
 	}
 	hysteriaService.UpdateUsers(userList, userPasswordList)
 	inbound.service = hysteriaService
+	inbound.userIDList = userIDList
 	inbound.userNameList = userNameList
 	return inbound, nil
 }
@@ -205,10 +209,12 @@ func NewInbound(ctx context.Context, router adapter.Router, logger log.ContextLo
 // It implements adapter.ManagedUserInbound.
 func (h *Inbound) ReplaceUsers(users []adapter.ManagedUser) error {
 	userIDs := make([]int, len(users))
+	panelUserIDs := make([]string, len(users))
 	passwords := make([]string, len(users))
 	names := make([]string, len(users))
 	for i, u := range users {
 		userIDs[i] = i
+		panelUserIDs[i] = u.UserID
 		passwords[i] = u.Credential.Password
 		if u.Name != "" {
 			names[i] = u.Name
@@ -220,6 +226,7 @@ func (h *Inbound) ReplaceUsers(users []adapter.ManagedUser) error {
 		h.service.UpdateUsers(userIDs, passwords)
 	}
 	h.userLock.Lock()
+	h.userIDList = panelUserIDs
 	h.userNameList = names
 	h.userLock.Unlock()
 	return nil
@@ -240,12 +247,17 @@ func (h *Inbound) NewConnectionEx(ctx context.Context, conn net.Conn, source M.S
 	userID, _ := auth.UserFromContext[int](ctx)
 	h.userLock.RLock()
 	userCount := len(h.userNameList)
+	panelUserID := ""
 	userNme := ""
 	if userID < userCount {
+		if userID < len(h.userIDList) {
+			panelUserID = h.userIDList[userID]
+		}
 		userNme = h.userNameList[userID]
 	}
 	h.userLock.RUnlock()
 	if userNme != "" {
+		metadata.UserID = panelUserID
 		metadata.User = userNme
 		h.logger.InfoContext(ctx, "[", userNme, "] inbound connection to ", metadata.Destination)
 	} else {
@@ -269,12 +281,17 @@ func (h *Inbound) NewPacketConnectionEx(ctx context.Context, conn N.PacketConn, 
 	userID, _ := auth.UserFromContext[int](ctx)
 	h.userLock.RLock()
 	userCount := len(h.userNameList)
+	panelUserID := ""
 	userNme := ""
 	if userID < userCount {
+		if userID < len(h.userIDList) {
+			panelUserID = h.userIDList[userID]
+		}
 		userNme = h.userNameList[userID]
 	}
 	h.userLock.RUnlock()
 	if userNme != "" {
+		metadata.UserID = panelUserID
 		metadata.User = userNme
 		h.logger.InfoContext(ctx, "[", userNme, "] inbound packet connection to ", metadata.Destination)
 	} else {

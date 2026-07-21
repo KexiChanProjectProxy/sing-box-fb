@@ -22,9 +22,11 @@ func TestReplaceUsersBasic(t *testing.T) {
 	require.NoError(t, err)
 
 	h.userLock.RLock()
+	ids := h.userIDList
 	names := h.userNameList
 	h.userLock.RUnlock()
 
+	require.Equal(t, []string{"u1", "u2"}, ids)
 	require.Len(t, names, 2)
 	require.Equal(t, "alice", names[0])
 	require.Equal(t, "bob", names[1])
@@ -39,9 +41,11 @@ func TestReplaceUsersEmptyRemovesAll(t *testing.T) {
 	require.NoError(t, err)
 
 	h.userLock.RLock()
+	ids := h.userIDList
 	names := h.userNameList
 	h.userLock.RUnlock()
 
+	require.Len(t, ids, 0)
 	require.Len(t, names, 0)
 }
 
@@ -56,9 +60,11 @@ func TestReplaceUsersUserIDAsNameFallback(t *testing.T) {
 	require.NoError(t, err)
 
 	h.userLock.RLock()
+	ids := h.userIDList
 	names := h.userNameList
 	h.userLock.RUnlock()
 
+	require.Equal(t, []string{"user-123"}, ids)
 	require.Len(t, names, 1)
 	require.Equal(t, "user-123", names[0]) // UserID used when Name is empty
 }
@@ -81,9 +87,11 @@ func TestReplaceUsersAuthoritativeSnapshot(t *testing.T) {
 	require.NoError(t, err)
 
 	h.userLock.RLock()
+	ids := h.userIDList
 	names := h.userNameList
 	h.userLock.RUnlock()
 
+	require.Equal(t, []string{"u1"}, ids)
 	require.Len(t, names, 1)
 	require.Equal(t, "alice-updated", names[0])
 }

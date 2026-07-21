@@ -1,15 +1,58 @@
 package traffic
 
 import (
+	"context"
 	"io"
 	"net"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/internal/paneladapter/contract"
+	"github.com/sagernet/sing/common/buf"
+	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
 )
+
+type testPacketConn struct {
+	readPayload []byte
+	closed      bool
+}
+
+func (c *testPacketConn) ReadPacket(buffer *buf.Buffer) (M.Socksaddr, error) {
+	if len(c.readPayload) == 0 {
+		return M.Socksaddr{}, io.EOF
+	}
+	_, _ = buffer.Write(c.readPayload)
+	c.readPayload = nil
+	return M.ParseSocksaddr("1.1.1.1:53"), nil
+}
+
+func (c *testPacketConn) WritePacket(_ *buf.Buffer, _ M.Socksaddr) error {
+	return nil
+}
+
+func (c *testPacketConn) Close() error {
+	c.closed = true
+	return nil
+}
+
+func (c *testPacketConn) LocalAddr() net.Addr {
+	return &net.UDPAddr{}
+}
+
+func (c *testPacketConn) SetDeadline(_ time.Time) error {
+	return nil
+}
+
+func (c *testPacketConn) SetReadDeadline(_ time.Time) error {
+	return nil
+}
+
+func (c *testPacketConn) SetWriteDeadline(_ time.Time) error {
+	return nil
+}
 
 // helper: create a net.Pipe pair, write data, close.
 func pipeTransfer(t *testing.T, uploadBytes, downloadBytes []byte) (net.Conn, net.Conn) {
@@ -110,6 +153,98 @@ func TestTrackConnection_UploadDownload(t *testing.T) {
 	}
 	if rec.DownloadBytes != int64(len(downloadData)) {
 		t.Errorf("download = %d, want %d", rec.DownloadBytes, len(downloadData))
+	}
+}
+
+func TestRoutedConnectionUsesStableUserID(t *testing.T) {
+	tr := NewTracker(map[string]string{"hy2-in": "inbound-2"})
+	server, client := net.Pipe()
+	wrapped := tr.RoutedConnection(context.Background(), server, adapter.InboundContext{
+		Inbound: "hy2-in",
+		User:    "Platform Operator",
+		UserID:  "019f-user-id",
+	}, nil, nil)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = client.Write([]byte("upload"))
+		_ = client.Close()
+	}()
+	_, _ = io.ReadAll(wrapped)
+	_ = wrapped.Close()
+	<-done
+
+	report := tr.StageForReport(time.Now().Add(-time.Minute), time.Now(), "rev-1")
+	if len(report.Records) != 1 {
+		t.Fatalf("expected 1 record, got %d", len(report.Records))
+	}
+	if report.Records[0].UserID != "019f-user-id" {
+		t.Fatalf("user_id = %q, want stable panel id", report.Records[0].UserID)
+	}
+	if report.Records[0].UploadBytes != int64(len("upload")) {
+		t.Fatalf("upload = %d, want %d", report.Records[0].UploadBytes, len("upload"))
+	}
+}
+
+func TestRoutedConnectionFallsBackToUser(t *testing.T) {
+	tr := NewTracker(map[string]string{"static-in": "inbound-1"})
+	server, client := net.Pipe()
+	wrapped := tr.RoutedConnection(context.Background(), server, adapter.InboundContext{
+		Inbound: "static-in",
+		User:    "static-user",
+	}, nil, nil)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = client.Write([]byte("upload"))
+		_ = client.Close()
+	}()
+	_, _ = io.ReadAll(wrapped)
+	_ = wrapped.Close()
+	<-done
+
+	report := tr.StageForReport(time.Now().Add(-time.Minute), time.Now(), "rev-1")
+	if len(report.Records) != 1 || report.Records[0].UserID != "static-user" {
+		t.Fatalf("unexpected fallback record: %+v", report.Records)
+	}
+}
+
+func TestRoutedPacketConnectionUsesStableUserID(t *testing.T) {
+	tr := NewTracker(map[string]string{"hy2-in": "inbound-2"})
+	packetConn := &testPacketConn{readPayload: []byte("udp-upload")}
+	wrapped := tr.RoutedPacketConnection(context.Background(), packetConn, adapter.InboundContext{
+		Inbound: "hy2-in",
+		User:    "Platform Operator",
+		UserID:  "019f-user-id",
+	}, nil, nil)
+
+	readBuffer := buf.NewPacket()
+	defer readBuffer.Release()
+	if _, err := wrapped.ReadPacket(readBuffer); err != nil {
+		t.Fatalf("read packet: %v", err)
+	}
+
+	writeBuffer := buf.As([]byte("udp-download"))
+	if err := wrapped.WritePacket(writeBuffer, M.ParseSocksaddr("1.1.1.1:53")); err != nil {
+		t.Fatalf("write packet: %v", err)
+	}
+	_ = wrapped.Close()
+
+	report := tr.StageForReport(time.Now().Add(-time.Minute), time.Now(), "rev-1")
+	if len(report.Records) != 1 {
+		t.Fatalf("expected 1 record, got %d", len(report.Records))
+	}
+	record := report.Records[0]
+	if record.UserID != "019f-user-id" {
+		t.Fatalf("user_id = %q, want stable panel id", record.UserID)
+	}
+	if record.UploadBytes != int64(len("udp-upload")) {
+		t.Fatalf("upload = %d, want %d", record.UploadBytes, len("udp-upload"))
+	}
+	if record.DownloadBytes != int64(len("udp-download")) {
+		t.Fatalf("download = %d, want %d", record.DownloadBytes, len("udp-download"))
 	}
 }
 

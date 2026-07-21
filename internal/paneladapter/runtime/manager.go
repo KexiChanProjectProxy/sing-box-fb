@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/sagernet/sing-box"
+	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/include"
 	"github.com/sagernet/sing-box/internal/paneladapter/client"
 	"github.com/sagernet/sing-box/internal/paneladapter/contract"
@@ -45,7 +46,8 @@ type BoxFactory interface {
 
 // defaultBoxFactory is the production BoxFactory using box.New.
 type defaultBoxFactory struct {
-	logFactory log.Factory
+	logFactory     log.Factory
+	trafficTracker adapter.ConnectionTracker
 }
 
 func (f *defaultBoxFactory) Create(ctx context.Context, options option.Options) (*box.Box, error) {
@@ -57,6 +59,7 @@ func (f *defaultBoxFactory) Create(ctx context.Context, options option.Options) 
 	if err != nil {
 		return nil, E.Cause(err, "create box instance")
 	}
+	instance.Router().AppendTracker(f.trafficTracker)
 	if err := instance.Start(); err != nil {
 		instance.Close()
 		return nil, E.Cause(err, "start box instance")
@@ -126,7 +129,7 @@ func NewManager(fetcher ConfigurationFetcher, s *state.Store, t *traffic.Tracker
 		trafficTracker: t,
 		logFactory:     logFactory,
 		logger:         logFactory.NewLogger("panel/runtime"),
-		factory:        &defaultBoxFactory{logFactory: logFactory},
+		factory:        &defaultBoxFactory{logFactory: logFactory, trafficTracker: t},
 	}
 	for _, opt := range opts {
 		opt(m)

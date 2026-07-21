@@ -19,15 +19,19 @@
 package traffic
 
 import (
+	"context"
 	"net"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/internal/paneladapter/contract"
 	"github.com/sagernet/sing/common/bufio"
 	N "github.com/sagernet/sing/common/network"
 )
+
+var _ adapter.ConnectionTracker = (*Tracker)(nil)
 
 // key is the accounting identity for traffic: (inboundTag, userID).
 type key struct {
@@ -99,11 +103,17 @@ func (t *Tracker) UpdateInboundMapping(mapping map[string]string) {
 	t.mu.Unlock()
 }
 
-// inboundID returns the panel inbound_id for a given sing-box inbound tag,
-// or ("", false) if the inbound is not managed.
-func (t *Tracker) inboundID(inboundTag string) (string, bool) {
+// inboundIDLocked returns the panel inbound_id for a given sing-box inbound
+// tag. The caller must hold t.mu.
+func (t *Tracker) inboundIDLocked(inboundTag string) (string, bool) {
 	id, ok := t.inboundMapping[inboundTag]
 	return id, ok
+}
+
+func (t *Tracker) inboundID(inboundTag string) (string, bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.inboundIDLocked(inboundTag)
 }
 
 // getOrCreateCounters returns the counters for the given key, creating them
@@ -121,18 +131,22 @@ func (t *Tracker) getOrCreateCounters(k key) *counters {
 // given inbound tag and user. If the inbound is unmanaged or the user is
 // empty, the original connection is returned unchanged.
 func (t *Tracker) TrackConnection(conn net.Conn, inboundTag, userID string) net.Conn {
-	inboundID, ok := t.inboundID(inboundTag)
-	if !ok || userID == "" {
+	if userID == "" {
 		return conn
 	}
 
-	t.activeConns.Add(1)
 	k := key{InboundTag: inboundTag, UserID: userID}
 
 	t.mu.Lock()
+	inboundID, ok := t.inboundIDLocked(inboundTag)
+	if !ok {
+		t.mu.Unlock()
+		return conn
+	}
 	c := t.getOrCreateCounters(k)
 	c.Active.Add(1)
 	t.mu.Unlock()
+	t.activeConns.Add(1)
 
 	wrapped := bufio.NewCounterConn(conn,
 		[]N.CountFunc{func(n int64) {
@@ -158,18 +172,22 @@ func (t *Tracker) TrackConnection(conn net.Conn, inboundTag, userID string) net.
 // for the given inbound tag and user. If the inbound is unmanaged or the
 // user is empty, the original connection is returned unchanged.
 func (t *Tracker) TrackPacketConnection(conn N.PacketConn, inboundTag, userID string) N.PacketConn {
-	inboundID, ok := t.inboundID(inboundTag)
-	if !ok || userID == "" {
+	if userID == "" {
 		return conn
 	}
 
-	t.activeConns.Add(1)
 	k := key{InboundTag: inboundTag, UserID: userID}
 
 	t.mu.Lock()
+	inboundID, ok := t.inboundIDLocked(inboundTag)
+	if !ok {
+		t.mu.Unlock()
+		return conn
+	}
 	c := t.getOrCreateCounters(k)
 	c.Active.Add(1)
 	t.mu.Unlock()
+	t.activeConns.Add(1)
 
 	wrapped := bufio.NewCounterPacketConn(conn,
 		[]N.CountFunc{func(n int64) {
@@ -194,11 +212,7 @@ func (t *Tracker) TrackPacketConnection(conn N.PacketConn, inboundTag, userID st
 // TrackDistinctIP records a client IP for aggregate distinct-IP counting.
 // Raw IPs are never persisted or reported — only the count is exposed.
 func (t *Tracker) TrackDistinctIP(ip string, inboundTag, userID string) {
-	if ip == "" {
-		return
-	}
-	_, ok := t.inboundID(inboundTag)
-	if !ok || userID == "" {
+	if ip == "" || userID == "" {
 		return
 	}
 
@@ -206,6 +220,9 @@ func (t *Tracker) TrackDistinctIP(ip string, inboundTag, userID string) {
 
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	if _, ok := t.inboundIDLocked(inboundTag); !ok {
+		return
+	}
 
 	ipSet, ok := t.distinctIPs[k]
 	if !ok {
@@ -234,7 +251,7 @@ func (t *Tracker) StageForReport(startedAt, endedAt time.Time, configRevision st
 		down := c.Download.Load()
 		snapshot[k] = [2]int64{up, down}
 
-		inboundID, ok := t.inboundID(k.InboundTag)
+		inboundID, ok := t.inboundIDLocked(k.InboundTag)
 		if !ok || k.UserID == "" {
 			continue
 		}
@@ -260,6 +277,30 @@ func (t *Tracker) StageForReport(startedAt, endedAt time.Time, configRevision st
 	}
 
 	return report
+}
+
+// RoutedConnection implements sing-box's route-level traffic hook.
+func (t *Tracker) RoutedConnection(_ context.Context, conn net.Conn, metadata adapter.InboundContext, _ adapter.Rule, _ adapter.Outbound) net.Conn {
+	userID := metadata.UserID
+	if userID == "" {
+		userID = metadata.User
+	}
+	if metadata.Source.IsValid() {
+		t.TrackDistinctIP(metadata.Source.String(), metadata.Inbound, userID)
+	}
+	return t.TrackConnection(conn, metadata.Inbound, userID)
+}
+
+// RoutedPacketConnection implements sing-box's packet route traffic hook.
+func (t *Tracker) RoutedPacketConnection(_ context.Context, conn N.PacketConn, metadata adapter.InboundContext, _ adapter.Rule, _ adapter.Outbound) N.PacketConn {
+	userID := metadata.UserID
+	if userID == "" {
+		userID = metadata.User
+	}
+	if metadata.Source.IsValid() {
+		t.TrackDistinctIP(metadata.Source.String(), metadata.Inbound, userID)
+	}
+	return t.TrackPacketConnection(conn, metadata.Inbound, userID)
 }
 
 // ConfirmJournaled confirms that the staged data was durably persisted

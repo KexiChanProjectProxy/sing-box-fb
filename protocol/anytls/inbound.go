@@ -159,8 +159,10 @@ func (h *inboundHandler) NewConnectionEx(ctx context.Context, conn net.Conn, sou
 		displayName, hasManaged := h.managedNames[userName]
 		h.userLock.RUnlock()
 		if hasManaged {
+			metadata.UserID = userName
 			metadata.User = displayName
 		} else {
+			metadata.UserID = userName
 			metadata.User = userName
 		}
 		h.logger.InfoContext(ctx, "[", metadata.User, "] inbound connection to ", metadata.Destination)
