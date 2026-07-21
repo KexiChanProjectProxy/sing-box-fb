@@ -39,6 +39,7 @@ type key struct {
 type counters struct {
 	Upload   atomic.Int64
 	Download atomic.Int64
+	Active   atomic.Int64
 }
 
 // stagedSnapshot holds a staged report snapshot together with the live
@@ -130,6 +131,7 @@ func (t *Tracker) TrackConnection(conn net.Conn, inboundTag, userID string) net.
 
 	t.mu.Lock()
 	c := t.getOrCreateCounters(k)
+	c.Active.Add(1)
 	t.mu.Unlock()
 
 	wrapped := bufio.NewCounterConn(conn,
@@ -147,6 +149,8 @@ func (t *Tracker) TrackConnection(conn net.Conn, inboundTag, userID string) net.
 		inboundTag: inboundTag,
 		inboundID:  inboundID,
 		userID:     userID,
+		counterKey: k,
+		counters:   c,
 	}
 }
 
@@ -164,6 +168,7 @@ func (t *Tracker) TrackPacketConnection(conn N.PacketConn, inboundTag, userID st
 
 	t.mu.Lock()
 	c := t.getOrCreateCounters(k)
+	c.Active.Add(1)
 	t.mu.Unlock()
 
 	wrapped := bufio.NewCounterPacketConn(conn,
@@ -181,6 +186,8 @@ func (t *Tracker) TrackPacketConnection(conn N.PacketConn, inboundTag, userID st
 		inboundTag: inboundTag,
 		inboundID:  inboundID,
 		userID:     userID,
+		counterKey: k,
+		counters:   c,
 	}
 }
 
@@ -304,14 +311,28 @@ func (t *Tracker) ResetLiveCountersWhenJournaled() {
 		c.Upload.Add(-snap[0])
 		c.Download.Add(-snap[1])
 
-		// Clean up zero counters to avoid map growth.
-		if c.Upload.Load() == 0 && c.Download.Load() == 0 {
+		// Connections retain pointers to their counters for their entire
+		// lifetime. Deleting an active counter would make subsequent bytes
+		// invisible to future report windows.
+		if c.Active.Load() == 0 && c.Upload.Load() == 0 && c.Download.Load() == 0 {
 			delete(t.live, k)
 		}
 	}
 
 	// Clear staged state.
 	t.staged = nil
+}
+
+func (t *Tracker) releaseCounters(k key, c *counters) {
+	c.Active.Add(-1)
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	current, ok := t.live[k]
+	if ok && current == c && c.Active.Load() == 0 && c.Upload.Load() == 0 && c.Download.Load() == 0 {
+		delete(t.live, k)
+	}
 }
 
 // GetRuntimeMetrics returns aggregate runtime metrics for heartbeat.
@@ -399,11 +420,18 @@ type trackedConn struct {
 	inboundTag string
 	inboundID  string
 	userID     string
+	counterKey key
+	counters   *counters
+	closeOnce  sync.Once
 }
 
 func (c *trackedConn) Close() error {
-	c.tracker.activeConns.Add(-1)
-	return c.Conn.Close()
+	err := c.Conn.Close()
+	c.closeOnce.Do(func() {
+		c.tracker.activeConns.Add(-1)
+		c.tracker.releaseCounters(c.counterKey, c.counters)
+	})
+	return err
 }
 
 func (c *trackedConn) Upstream() any {
@@ -418,11 +446,18 @@ type trackedPacketConn struct {
 	inboundTag string
 	inboundID  string
 	userID     string
+	counterKey key
+	counters   *counters
+	closeOnce  sync.Once
 }
 
 func (c *trackedPacketConn) Close() error {
-	c.tracker.activeConns.Add(-1)
-	return c.PacketConn.Close()
+	err := c.PacketConn.Close()
+	c.closeOnce.Do(func() {
+		c.tracker.activeConns.Add(-1)
+		c.tracker.releaseCounters(c.counterKey, c.counters)
+	})
+	return err
 }
 
 func (c *trackedPacketConn) Upstream() any {

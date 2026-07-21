@@ -113,6 +113,59 @@ func TestTrackConnection_UploadDownload(t *testing.T) {
 	}
 }
 
+func TestTrackConnection_PreservesTrafficAcrossReportWindows(t *testing.T) {
+	tr := NewTracker(map[string]string{
+		"hy2-in": "inbound-2",
+	})
+
+	server, client := net.Pipe()
+	wrapped := tr.TrackConnection(server, "hy2-in", "user-1")
+	defer wrapped.Close()
+	defer client.Close()
+
+	transferUpload := func(data []byte) {
+		t.Helper()
+
+		readDone := make(chan error, 1)
+		go func() {
+			_, err := io.ReadFull(wrapped, make([]byte, len(data)))
+			readDone <- err
+		}()
+
+		if _, err := client.Write(data); err != nil {
+			t.Fatalf("write upload: %v", err)
+		}
+		if err := <-readDone; err != nil {
+			t.Fatalf("read upload: %v", err)
+		}
+	}
+
+	firstWindow := []byte("first report window")
+	transferUpload(firstWindow)
+
+	report := tr.StageForReport(time.Now().Add(-time.Minute), time.Now(), "rev-1")
+	if len(report.Records) != 1 {
+		t.Fatalf("first window records = %d, want 1", len(report.Records))
+	}
+	if report.Records[0].UploadBytes != int64(len(firstWindow)) {
+		t.Fatalf("first window upload = %d, want %d", report.Records[0].UploadBytes, len(firstWindow))
+	}
+
+	tr.ConfirmJournaled()
+	tr.ResetLiveCountersWhenJournaled()
+
+	secondWindow := []byte("same connection after reset")
+	transferUpload(secondWindow)
+
+	report = tr.StageForReport(time.Now().Add(-time.Minute), time.Now(), "rev-2")
+	if len(report.Records) != 1 {
+		t.Fatalf("second window records = %d, want 1", len(report.Records))
+	}
+	if report.Records[0].UploadBytes != int64(len(secondWindow)) {
+		t.Fatalf("second window upload = %d, want %d", report.Records[0].UploadBytes, len(secondWindow))
+	}
+}
+
 func TestTrackConnection_UnmanagedInbound(t *testing.T) {
 	mapping := map[string]string{
 		"ss-in": "inbound-1",
