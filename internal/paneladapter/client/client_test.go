@@ -305,6 +305,49 @@ func TestFetchConfiguration_Headers(t *testing.T) {
 	}
 }
 
+func TestRotateToken_usesCurrentBearerAndReturnsReplacement(t *testing.T) {
+	expiresAt := time.Now().UTC().Add(24 * time.Hour).Truncate(time.Second)
+	h := &captureHandler{
+		statusCode: http.StatusCreated,
+		responseBody: TokenRotationResponse{
+			Token:              "replacement-token",
+			ExpiresAt:          expiresAt,
+			RotateAfterSeconds: 21600,
+		},
+	}
+	server := httptest.NewServer(h)
+	defer server.Close()
+
+	c, err := newTestClient(server.URL)
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	rotated, err := c.RotateToken(context.Background())
+	if err != nil {
+		t.Fatalf("RotateToken: %v", err)
+	}
+	if h.method != http.MethodPost || h.path != "/api/v1/nodes/node-42/adapter-token/rotate" {
+		t.Fatalf("request = %s %s", h.method, h.path)
+	}
+	if got := h.headers.Get("Authorization"); got != "Bearer "+testToken {
+		t.Fatalf("Authorization = %q", got)
+	}
+	if rotated.Token != "replacement-token" || rotated.RotateAfterSeconds != 21600 {
+		t.Fatalf("rotation response = %+v", rotated)
+	}
+
+	if err := c.SetToken(rotated.Token); err != nil {
+		t.Fatalf("SetToken: %v", err)
+	}
+	req, err := c.newRequest(context.Background(), http.MethodGet, c.configurationURL(), nil)
+	if err != nil {
+		t.Fatalf("newRequest: %v", err)
+	}
+	if got := req.Header.Get("Authorization"); got != "Bearer replacement-token" {
+		t.Fatalf("updated Authorization = %q", got)
+	}
+}
+
 func TestFetchConfiguration_304NotModified(t *testing.T) {
 	h := &captureHandler{
 		statusCode: 304,

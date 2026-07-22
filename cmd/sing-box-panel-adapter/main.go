@@ -29,6 +29,11 @@ import (
 
 var configPath string
 
+const (
+	defaultTokenRotationInterval = 6 * time.Hour
+	tokenRotationRetryInterval   = 5 * time.Minute
+)
+
 var rootCommand = &cobra.Command{
 	Use:   "sing-box-panel-adapter",
 	Short: "Panel adapter for sing-box",
@@ -239,6 +244,17 @@ func runAdapter() error {
 		})
 	}()
 
+	// Adapter-token rotation goroutine.
+	rotationInterval := cfg.TokenRotationInterval.Duration
+	if rotationInterval <= 0 {
+		rotationInterval = defaultTokenRotationInterval
+	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		runTokenRotation(adapterCtx, panelClient, configPath, rotationInterval, logger)
+	}()
+
 	logger.Info("adapter running — all goroutines started")
 
 	// -----------------------------------------------------------------------
@@ -266,6 +282,9 @@ func runAdapter() error {
 					logFactory.SetLevel(level)
 				}
 				cfg = newCfg
+				if err := panelClient.SetToken(newCfg.NodeToken); err != nil {
+					logger.Warn("reload adapter token: ", err)
+				}
 				logger.Info("adapter config reloaded")
 			}
 			continue
@@ -301,6 +320,68 @@ func runAdapter() error {
 	debug.FreeOSMemory()
 	logger.Info("adapter stopped")
 	return nil
+}
+
+func runTokenRotation(
+	ctx context.Context,
+	panelClient *client.Client,
+	path string,
+	interval time.Duration,
+	logger log.ContextLogger,
+) {
+	runTokenRotationWithRetry(ctx, panelClient, path, interval, tokenRotationRetryInterval, logger)
+}
+
+func runTokenRotationWithRetry(
+	ctx context.Context,
+	panelClient *client.Client,
+	path string,
+	interval time.Duration,
+	retryInterval time.Duration,
+	logger log.ContextLogger,
+) {
+	if interval <= 0 {
+		interval = defaultTokenRotationInterval
+	}
+	if retryInterval <= 0 {
+		retryInterval = tokenRotationRetryInterval
+	}
+	next := interval
+	var pending *client.TokenRotationResponse
+	timer := time.NewTimer(next)
+	defer timer.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-timer.C:
+			if pending == nil {
+				rotated, err := panelClient.RotateToken(ctx)
+				if err != nil {
+					logger.Warn("token-rotation: ", err)
+					next = retryInterval
+					timer.Reset(next)
+					continue
+				}
+				pending = rotated
+			}
+			if err := config.UpdateNodeToken(path, pending.Token); err != nil {
+				logger.Warn("token-rotation persist config: ", err)
+				next = retryInterval
+			} else if err := panelClient.SetToken(pending.Token); err != nil {
+				logger.Warn("token-rotation activate token: ", err)
+				next = retryInterval
+			} else {
+				next = interval
+				if pending.RotateAfterSeconds > 0 {
+					next = time.Duration(pending.RotateAfterSeconds) * time.Second
+				}
+				logger.Info("adapter token rotated, expires_at=", pending.ExpiresAt.UTC().Format(time.RFC3339))
+				pending = nil
+			}
+			timer.Reset(next)
+		}
+	}
 }
 
 // ---------------------------------------------------------------------------

@@ -49,15 +49,16 @@ type PollBounds struct {
 // Config is the local configuration for the panel adapter daemon.
 // All fields use snake_case JSON tags — never V2bX-style names.
 type Config struct {
-	PanelBaseURL        string      `json:"panel_base_url"`
-	NodeID              string      `json:"node_id"`
-	NodeToken           string      `json:"node_token"`
-	StatePath           string      `json:"state_path"`
-	GeneratedConfigPath string      `json:"generated_config_path,omitempty"`
-	HTTPTimeout         Duration    `json:"http_timeout,omitempty"`
-	PollIntervalBounds  *PollBounds `json:"poll_interval_bounds,omitempty"`
-	LogLevel            string      `json:"log_level,omitempty"`
-	Insecure            bool        `json:"insecure,omitempty"`
+	PanelBaseURL          string      `json:"panel_base_url"`
+	NodeID                string      `json:"node_id"`
+	NodeToken             string      `json:"node_token"`
+	TokenRotationInterval Duration    `json:"token_rotation_interval,omitempty"`
+	StatePath             string      `json:"state_path"`
+	GeneratedConfigPath   string      `json:"generated_config_path,omitempty"`
+	HTTPTimeout           Duration    `json:"http_timeout,omitempty"`
+	PollIntervalBounds    *PollBounds `json:"poll_interval_bounds,omitempty"`
+	LogLevel              string      `json:"log_level,omitempty"`
+	Insecure              bool        `json:"insecure,omitempty"`
 }
 
 // Load reads and decodes a Config from the given file path.
@@ -111,6 +112,9 @@ func (c *Config) Validate() error {
 	if c.NodeToken == "" {
 		return fmt.Errorf("node_token is required")
 	}
+	if c.TokenRotationInterval.Duration < 0 {
+		return fmt.Errorf("token_rotation_interval must not be negative")
+	}
 
 	// Required: StatePath — parent directory must be writable
 	if c.StatePath == "" {
@@ -139,5 +143,55 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	return nil
+}
+
+// UpdateNodeToken atomically replaces node_token while preserving the rest of
+// the validated adapter configuration. The secret file is always mode 0600.
+func UpdateNodeToken(path, token string) error {
+	if token == "" {
+		return fmt.Errorf("node_token is required")
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		return err
+	}
+	cfg.NodeToken = token
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode config: %w", err)
+	}
+	data = append(data, '\n')
+
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".adapter-config-*")
+	if err != nil {
+		return fmt.Errorf("create temporary config: %w", err)
+	}
+	tmpPath := tmp.Name()
+	cleanup := func() {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+	}
+	if err := tmp.Chmod(0o600); err != nil {
+		cleanup()
+		return fmt.Errorf("chmod temporary config: %w", err)
+	}
+	if _, err := tmp.Write(data); err != nil {
+		cleanup()
+		return fmt.Errorf("write temporary config: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		cleanup()
+		return fmt.Errorf("sync temporary config: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("close temporary config: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("replace adapter config: %w", err)
+	}
 	return nil
 }

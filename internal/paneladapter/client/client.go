@@ -19,6 +19,8 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/sagernet/sing-box/internal/paneladapter/contract"
 	"github.com/sagernet/sing-box/log"
@@ -133,6 +135,7 @@ func WithLogger(l log.ContextLogger) Option {
 type Client struct {
 	baseURL    *url.URL
 	nodeID     string
+	tokenMu    sync.RWMutex
 	token      string
 	httpClient *http.Client
 	logger     log.ContextLogger
@@ -201,6 +204,7 @@ const (
 	pathUsers         = "/api/v1/nodes/{nodeID}/inbounds/{inboundID}/users"
 	pathTraffic       = "/api/v1/nodes/{nodeID}/traffic-reports"
 	pathHeartbeat     = "/api/v1/nodes/{nodeID}/heartbeats"
+	pathTokenRotation = "/api/v1/nodes/{nodeID}/adapter-token/rotate"
 )
 
 func (c *Client) configurationURL() string {
@@ -237,6 +241,14 @@ func (c *Client) heartbeatURL() string {
 	return u.String()
 }
 
+func (c *Client) tokenRotationURL() string {
+	u := *c.baseURL
+	u.Path = strings.Replace(pathTokenRotation, "{nodeID}", url.PathEscape(c.nodeID), 1)
+	u.RawQuery = ""
+	u.Fragment = ""
+	return u.String()
+}
+
 // ---------------------------------------------------------------------------
 // Request helpers
 // ---------------------------------------------------------------------------
@@ -252,12 +264,29 @@ func (c *Client) newRequest(ctx context.Context, method, urlStr string, body io.
 	if err != nil {
 		return nil, E.Cause(err, "create request")
 	}
-	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Authorization", "Bearer "+c.currentToken())
 	req.Header.Set("Accept", "application/json")
 	if req.Header.Get("X-Request-ID") == "" {
 		req.Header.Set("X-Request-ID", generateRequestID())
 	}
 	return req, nil
+}
+
+func (c *Client) currentToken() string {
+	c.tokenMu.RLock()
+	defer c.tokenMu.RUnlock()
+	return c.token
+}
+
+// SetToken replaces the bearer token used by subsequent requests.
+func (c *Client) SetToken(token string) error {
+	if token == "" {
+		return E.New("token is required")
+	}
+	c.tokenMu.Lock()
+	c.token = token
+	c.tokenMu.Unlock()
+	return nil
 }
 
 func (c *Client) doRequest(req *http.Request) (*http.Response, error) {
@@ -499,6 +528,43 @@ func (c *Client) SendHeartbeat(ctx context.Context, heartbeat *contract.Heartbea
 	default:
 		return c.handleErrorResponse(resp)
 	}
+}
+
+// TokenRotationResponse is returned after the panel issues a replacement token.
+type TokenRotationResponse struct {
+	Token              string    `json:"token"`
+	ExpiresAt          time.Time `json:"expires_at"`
+	RotateAfterSeconds int       `json:"rotate_after_seconds"`
+}
+
+// RotateToken requests a replacement for the currently authenticated token.
+// The caller is responsible for persisting and activating the returned secret.
+func (c *Client) RotateToken(ctx context.Context) (*TokenRotationResponse, error) {
+	req, err := c.newRequest(ctx, http.MethodPost, c.tokenRotationURL(), nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.doRequest(req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != http.StatusCreated {
+		return nil, c.handleErrorResponse(resp)
+	}
+	body, err := readAndClose(resp)
+	if err != nil {
+		return nil, E.Cause(err, "read token rotation response")
+	}
+	var rotated TokenRotationResponse
+	if err := json.Unmarshal(body, &rotated); err != nil {
+		return nil, E.Cause(err, "decode token rotation response")
+	}
+	if rotated.Token == "" || rotated.ExpiresAt.IsZero() {
+		return nil, E.New("invalid token rotation response")
+	}
+	return &rotated, nil
 }
 
 // ---------------------------------------------------------------------------

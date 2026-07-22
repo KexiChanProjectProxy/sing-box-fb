@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // helperConfig returns a valid minimal production Config.
@@ -226,6 +227,44 @@ func TestLoadValidFile(t *testing.T) {
 	}
 	if cfg.LogLevel != "info" {
 		t.Fatalf("expected log_level=info, got %q", cfg.LogLevel)
+	}
+}
+
+func TestUpdateNodeToken_atomicallyPreservesConfig(t *testing.T) {
+	dir := t.TempDir()
+	statePath := filepath.Join(dir, "state.json")
+	cfgPath := filepath.Join(dir, "adapter.json")
+	payload := `{
+		"panel_base_url": "https://panel.example.com",
+		"node_id": "node-1",
+		"node_token": "old-token",
+		"token_rotation_interval": "6h",
+		"state_path": "` + statePath + `",
+		"log_level": "debug"
+	}`
+	if err := os.WriteFile(cfgPath, []byte(payload), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := UpdateNodeToken(cfgPath, "new-token"); err != nil {
+		t.Fatalf("UpdateNodeToken: %v", err)
+	}
+	cfg, err := Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load updated config: %v", err)
+	}
+	if cfg.NodeToken != "new-token" {
+		t.Fatalf("node_token = %q", cfg.NodeToken)
+	}
+	if cfg.NodeID != "node-1" || cfg.LogLevel != "debug" || cfg.TokenRotationInterval.Duration != 6*time.Hour {
+		t.Fatalf("unrelated config changed: %+v", cfg)
+	}
+	info, err := os.Stat(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("config mode = %o, want 600", got)
 	}
 }
 
