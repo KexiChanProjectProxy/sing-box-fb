@@ -306,13 +306,13 @@ func TestFetchConfiguration_Headers(t *testing.T) {
 }
 
 func TestRotateToken_usesCurrentBearerAndReturnsReplacement(t *testing.T) {
-	expiresAt := time.Now().UTC().Add(24 * time.Hour).Truncate(time.Second)
+	expiresAt := time.Now().UTC().Add(30 * 24 * time.Hour).Truncate(time.Second)
 	h := &captureHandler{
 		statusCode: http.StatusCreated,
 		responseBody: TokenRotationResponse{
 			Token:              "replacement-token",
 			ExpiresAt:          expiresAt,
-			RotateAfterSeconds: 21600,
+			RotateAfterSeconds: 86400,
 		},
 	}
 	server := httptest.NewServer(h)
@@ -332,7 +332,7 @@ func TestRotateToken_usesCurrentBearerAndReturnsReplacement(t *testing.T) {
 	if got := h.headers.Get("Authorization"); got != "Bearer "+testToken {
 		t.Fatalf("Authorization = %q", got)
 	}
-	if rotated.Token != "replacement-token" || rotated.RotateAfterSeconds != 21600 {
+	if rotated.Token != "replacement-token" || rotated.RotateAfterSeconds != 86400 {
 		t.Fatalf("rotation response = %+v", rotated)
 	}
 

@@ -26,8 +26,8 @@ func TestRunTokenRotation_retriesPendingTokenWithoutRequestingAnother(t *testing
 		w.WriteHeader(http.StatusCreated)
 		_ = json.NewEncoder(w).Encode(client.TokenRotationResponse{
 			Token:              "replacement-token",
-			ExpiresAt:          time.Now().UTC().Add(24 * time.Hour),
-			RotateAfterSeconds: 21600,
+			ExpiresAt:          time.Now().UTC().Add(30 * 24 * time.Hour),
+			RotateAfterSeconds: 86400,
 		})
 	}))
 	defer server.Close()

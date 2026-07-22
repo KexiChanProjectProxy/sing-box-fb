@@ -30,7 +30,7 @@ import (
 var configPath string
 
 const (
-	defaultTokenRotationInterval = 6 * time.Hour
+	defaultTokenRotationInterval = 24 * time.Hour
 	tokenRotationRetryInterval   = 5 * time.Minute
 )
 

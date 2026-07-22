@@ -238,7 +238,7 @@ func TestUpdateNodeToken_atomicallyPreservesConfig(t *testing.T) {
 		"panel_base_url": "https://panel.example.com",
 		"node_id": "node-1",
 		"node_token": "old-token",
-		"token_rotation_interval": "6h",
+		"token_rotation_interval": "24h",
 		"state_path": "` + statePath + `",
 		"log_level": "debug"
 	}`
@@ -256,7 +256,7 @@ func TestUpdateNodeToken_atomicallyPreservesConfig(t *testing.T) {
 	if cfg.NodeToken != "new-token" {
 		t.Fatalf("node_token = %q", cfg.NodeToken)
 	}
-	if cfg.NodeID != "node-1" || cfg.LogLevel != "debug" || cfg.TokenRotationInterval.Duration != 6*time.Hour {
+	if cfg.NodeID != "node-1" || cfg.LogLevel != "debug" || cfg.TokenRotationInterval.Duration != 24*time.Hour {
 		t.Fatalf("unrelated config changed: %+v", cfg)
 	}
 	info, err := os.Stat(cfgPath)
