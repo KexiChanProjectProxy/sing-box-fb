@@ -3,15 +3,12 @@ package agent
 import (
 	"encoding/json"
 	"testing"
-
-	"github.com/sagernet/sing-box/internal/paneladapter/contract"
-	E "github.com/sagernet/sing/common/exceptions"
 )
 
 // TestConfigMerger_DuplicateTag tests that duplicate tags across nodes are rejected.
 func TestConfigMerger_DuplicateTag(t *testing.T) {
 	// Given
-	merger := NewConfigMerger(nil)
+	merger := NewConfigMerger()
 	nodeStates := map[string]*NodeConfigState{
 		"node-1": {Config: nodeConfigWithInbound(t, "node-1", "trojan", "shared-tag")},
 		"node-2": {Config: nodeConfigWithInbound(t, "node-2", "vmess", "shared-tag")},
@@ -44,7 +41,7 @@ func TestConfigMerger_DuplicateTag(t *testing.T) {
 // TestConfigMerger_InboundIDMismatch tests that inbound_id must equal node_id.
 func TestConfigMerger_InboundIDMismatch(t *testing.T) {
 	// Given
-	merger := NewConfigMerger(nil)
+	merger := NewConfigMerger()
 	badConfig := nodeConfigWithInbound(t, "different-node", "trojan", "unique-tag")
 	nodeStates := map[string]*NodeConfigState{
 		"node-1": {Config: badConfig},
@@ -77,7 +74,7 @@ func TestConfigMerger_InboundIDMismatch(t *testing.T) {
 // TestConfigMerger_EmptyTag tests that empty tags are rejected.
 func TestConfigMerger_EmptyTag(t *testing.T) {
 	// Given
-	merger := NewConfigMerger(nil)
+	merger := NewConfigMerger()
 	emptyTagConfig := json.RawMessage(`{
 		"inbounds": [{
 			"type": "trojan",
@@ -116,7 +113,7 @@ func TestConfigMerger_EmptyTag(t *testing.T) {
 // TestConfigMerger_MalformedConfig tests that malformed JSON is rejected.
 func TestConfigMalformedConfig(t *testing.T) {
 	// Given
-	merger := NewConfigMerger(nil)
+	merger := NewConfigMerger()
 	malformedConfig := json.RawMessage(`{invalid json}`)
 	nodeStates := map[string]*NodeConfigState{
 		"node-1": {Config: malformedConfig},
@@ -149,7 +146,7 @@ func TestConfigMalformedConfig(t *testing.T) {
 // TestConfigMerger_NoNodes tests that empty node map is rejected.
 func TestConfigMerger_NoNodes(t *testing.T) {
 	// Given
-	merger := NewConfigMerger(nil)
+	merger := NewConfigMerger()
 
 	// When
 	result, err := merger.Merge(MergeContext{}, map[string]*NodeConfigState{})
@@ -178,7 +175,7 @@ func TestConfigMerger_NoNodes(t *testing.T) {
 // TestConfigMerger_MissingInboundTag tests that inbounds without tags are rejected.
 func TestConfigMerger_MissingInboundTag(t *testing.T) {
 	// Given
-	merger := NewConfigMerger(nil)
+	merger := NewConfigMerger()
 	noTagConfig := json.RawMessage(`{
 		"inbounds": [{
 			"type": "trojan",
@@ -216,7 +213,7 @@ func TestConfigMerger_MissingInboundTag(t *testing.T) {
 // TestConfigMerger_HappyPath tests successful merge of valid configs.
 func TestConfigMerger_HappyPath(t *testing.T) {
 	// Given
-	merger := NewConfigMerger(nil)
+	merger := NewConfigMerger()
 	nodeStates := map[string]*NodeConfigState{
 		"node-1": {Config: nodeConfigWithInbound(t, "node-1", "trojan", "tag-1")},
 		"node-2": {Config: nodeConfigWithInbound(t, "node-2", "vmess", "tag-2")},
