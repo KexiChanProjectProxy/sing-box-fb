@@ -265,10 +265,10 @@ func TestRunPeriodicCancellation(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		runPeriodic(ctx, "test", 10*time.Millisecond, logger, func(ctx context.Context) error {
+		runPeriodic(ctx, periodicTask{Name: "test", Interval: 10 * time.Millisecond, Logger: logger, Call: func(ctx context.Context) error {
 			callCount++
 			return nil
-		})
+		}})
 	}()
 
 	// Let it tick a few times.
@@ -291,9 +291,9 @@ func TestRunPeriodicErrorLogging(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		runPeriodic(ctx, "err-test", 10*time.Millisecond, logger, func(ctx context.Context) error {
+		runPeriodic(ctx, periodicTask{Name: "err-test", Interval: 10 * time.Millisecond, Logger: logger, Call: func(ctx context.Context) error {
 			return fmt.Errorf("test error")
-		})
+		}})
 	}()
 
 	time.Sleep(50 * time.Millisecond)

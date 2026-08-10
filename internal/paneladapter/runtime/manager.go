@@ -5,7 +5,6 @@ package runtime
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -90,7 +89,7 @@ func WithBoxFactory(f BoxFactory) Option {
 // with apply strategies, and fail-closed semantics for managed inbounds.
 type Manager struct {
 	fetcher        ConfigurationFetcher
-	store          *state.Store
+	store          state.Repository
 	trafficTracker *traffic.Tracker
 	logFactory     log.Factory
 	logger         log.ContextLogger
@@ -109,7 +108,7 @@ type Manager struct {
 //
 // The caller must invoke Bootstrap to perform the initial configuration
 // fetch and Box creation before the manager is usable.
-func NewManager(fetcher ConfigurationFetcher, s *state.Store, t *traffic.Tracker, logFactory log.Factory, opts ...Option) (*Manager, error) {
+func NewManager(fetcher ConfigurationFetcher, s state.Repository, t *traffic.Tracker, logFactory log.Factory, opts ...Option) (*Manager, error) {
 	if fetcher == nil {
 		return nil, E.New("fetcher is required")
 	}
@@ -301,93 +300,6 @@ func (m *Manager) applyConfigLocked(ctx context.Context, cfg *contract.Configura
 	return nil
 }
 
-// recordPendingRevision records a new configuration revision as pending
-// without applying it. The pending revision will be reported in heartbeats.
-func (m *Manager) recordPendingRevision(cfg *contract.ConfigurationResponse, etag string) error {
-	if err := m.store.UpdateAndSave(func(s *state.State) {
-		s.Config = state.ConfigState{
-			Revision: cfg.Revision,
-			ETag:     etag,
-			NodeID:   cfg.NodeID,
-		}
-
-		// Record inbound metadata but mark as pending (not yet applied).
-		for _, ib := range cfg.ManagedInbounds {
-			is := state.InboundState{
-				InboundID: ib.InboundID,
-				Tag:       ib.Tag,
-				Protocol:  ib.Protocol,
-			}
-			if !contract.IsSupportedProtocol(ib.Protocol) {
-				is.UserLoadStatus = string(contract.UserLoadStatusUnsupportedProto)
-			}
-			s.Inbounds[ib.InboundID] = is
-		}
-	}); err != nil {
-		return E.Cause(err, "save pending revision state")
-	}
-
-	m.logger.Info("recorded pending configuration revision=", cfg.Revision, " (manual strategy)")
-	return nil
-}
-
-// updateStateApplied records the applied configuration revision, ETag,
-// and managed inbound metadata in the state store.
-func (m *Manager) updateStateApplied(cfg *contract.ConfigurationResponse, etag string, unsupported map[string]bool) {
-	if err := m.store.UpdateAndSave(func(s *state.State) {
-		s.Config = state.ConfigState{
-			Revision: cfg.Revision,
-			ETag:     etag,
-			NodeID:   cfg.NodeID,
-		}
-
-		// Update per-inbound state.
-		for _, ib := range cfg.ManagedInbounds {
-			is := state.InboundState{
-				InboundID: ib.InboundID,
-				Tag:       ib.Tag,
-				Protocol:  ib.Protocol,
-			}
-			if unsupported[ib.InboundID] {
-				is.UserLoadStatus = string(contract.UserLoadStatusUnsupportedProto)
-			} else {
-				// Fail-closed: empty initial load until first user snapshot.
-				is.UserLoadStatus = string(contract.UserLoadStatusEmptyInitialLoad)
-			}
-			s.Inbounds[ib.InboundID] = is
-		}
-	}); err != nil {
-		m.logger.Error("save state after apply: ", err)
-	}
-}
-
-// setInboundStatesApplyFailed marks all managed inbounds as apply_failed.
-func (m *Manager) setInboundStatesApplyFailed(cfg *contract.ConfigurationResponse) {
-	if err := m.store.UpdateAndSave(func(s *state.State) {
-		s.Config = state.ConfigState{
-			Revision: cfg.Revision,
-			ETag:     "", // No ETag since apply failed
-			NodeID:   cfg.NodeID,
-		}
-
-		for _, ib := range cfg.ManagedInbounds {
-			is := state.InboundState{
-				InboundID: ib.InboundID,
-				Tag:       ib.Tag,
-				Protocol:  ib.Protocol,
-			}
-			if !contract.IsSupportedProtocol(ib.Protocol) {
-				is.UserLoadStatus = string(contract.UserLoadStatusUnsupportedProto)
-			} else {
-				is.UserLoadStatus = string(contract.UserLoadStatusApplyFailed)
-			}
-			s.Inbounds[ib.InboundID] = is
-		}
-	}); err != nil {
-		m.logger.Error("save apply_failed state: ", err)
-	}
-}
-
 // closeLocked shuts down the current Box. Caller must hold m.mu.
 func (m *Manager) closeLocked() error {
 	if m.instance == nil {
@@ -400,100 +312,6 @@ func (m *Manager) closeLocked() error {
 	m.instance = nil
 	m.cancel = nil
 	return err
-}
-
-// ---------------------------------------------------------------------------
-// Template manipulation
-// ---------------------------------------------------------------------------
-
-// stripManagedInboundUsers returns a modified copy of the
-// SingBoxConfigTemplate where the "users" field of each managed inbound
-// is set to an empty array []. This ensures fail-closed semantics:
-// the inbound will reject all connections until the user polling loop
-// (T9) pushes the first valid user snapshot.
-func stripManagedInboundUsers(cfg *contract.ConfigurationResponse) (json.RawMessage, error) {
-	if len(cfg.SingBoxConfigTemplate) == 0 {
-		return nil, E.New("empty sing_box_config_template")
-	}
-
-	// Parse the template into a generic map for manipulation.
-	var template map[string]json.RawMessage
-	if err := json.Unmarshal(cfg.SingBoxConfigTemplate, &template); err != nil {
-		return nil, E.Cause(err, "parse config template as object")
-	}
-
-	// Collect managed inbound tags for lookup.
-	managedTags := make(map[string]contract.ManagedInbound, len(cfg.ManagedInbounds))
-	for _, ib := range cfg.ManagedInbounds {
-		managedTags[ib.Tag] = ib
-	}
-
-	// Get the inbounds array.
-	inboundsRaw, ok := template["inbounds"]
-	if !ok {
-		// No inbounds key — nothing to strip.
-		return cfg.SingBoxConfigTemplate, nil
-	}
-
-	// Parse the inbounds array.
-	var inbounds []json.RawMessage
-	if err := json.Unmarshal(inboundsRaw, &inbounds); err != nil {
-		return nil, E.Cause(err, "parse inbounds array")
-	}
-
-	emptyUsers := json.RawMessage(`[]`)
-	modified := false
-
-	for i, ibRaw := range inbounds {
-		var ib map[string]json.RawMessage
-		if err := json.Unmarshal(ibRaw, &ib); err != nil {
-			continue
-		}
-
-		// Extract the tag to check if this is a managed inbound.
-		tagRaw, hasTag := ib["tag"]
-		if !hasTag {
-			continue
-		}
-		var tag string
-		if err := json.Unmarshal(tagRaw, &tag); err != nil {
-			continue
-		}
-
-		managedInbound, managed := managedTags[tag]
-		if managed {
-			if managedInbound.UserApplyPolicy == contract.ApplyOnUserNone || managedInbound.Protocol == contract.ProtocolShadowsocks {
-				delete(ib, "managed")
-				delete(ib, "users")
-			} else if _, hasUsers := ib["users"]; hasUsers {
-				ib["users"] = emptyUsers
-			}
-			modifiedRaw, err := json.Marshal(ib)
-			if err != nil {
-				return nil, E.Cause(err, "re-marshal inbound with stripped users")
-			}
-			inbounds[i] = modifiedRaw
-			modified = true
-		}
-	}
-
-	// If no changes, return the original template.
-	if !modified {
-		return cfg.SingBoxConfigTemplate, nil
-	}
-
-	// Rebuild the template with modified inbounds.
-	newInbounds, err := json.Marshal(inbounds)
-	if err != nil {
-		return nil, E.Cause(err, "re-marshal inbounds array")
-	}
-	template["inbounds"] = newInbounds
-
-	result, err := json.Marshal(template)
-	if err != nil {
-		return nil, E.Cause(err, "re-marshal config template")
-	}
-	return result, nil
 }
 
 // ---------------------------------------------------------------------------

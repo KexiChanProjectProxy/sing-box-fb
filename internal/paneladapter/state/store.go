@@ -14,12 +14,14 @@ import (
 )
 
 // CurrentVersion is the schema version written by this code.
-const CurrentVersion = 1
+const CurrentVersion = 2
 
 // State holds the durable adapter state persisted to disk.
 // It MUST NOT contain bearer tokens, user passwords, or TLS secrets.
 type State struct {
 	Version        int                     `json:"version"`
+	Manifest       ManifestState           `json:"manifest,omitempty"`
+	Nodes          map[string]NodeState    `json:"nodes,omitempty"`
 	Config         ConfigState             `json:"config"`
 	Inbounds       map[string]InboundState `json:"inbounds"`
 	PendingReports []PendingReport         `json:"pending_reports,omitempty"`
@@ -59,25 +61,8 @@ func newState() *State {
 	return &State{
 		Version:  CurrentVersion,
 		Inbounds: make(map[string]InboundState),
+		Nodes:    make(map[string]NodeState),
 	}
-}
-
-// Clone returns a deep copy of the State, safe for independent mutation.
-func (s *State) Clone() *State {
-	if s == nil {
-		return newState()
-	}
-	clone := &State{
-		Version: s.Version,
-		Config:  s.Config,
-	}
-	clone.Inbounds = make(map[string]InboundState, len(s.Inbounds))
-	for k, v := range s.Inbounds {
-		clone.Inbounds[k] = v
-	}
-	clone.PendingReports = make([]PendingReport, len(s.PendingReports))
-	copy(clone.PendingReports, s.PendingReports)
-	return clone
 }
 
 // marshalJSON serializes the state to indented JSON bytes.
@@ -237,6 +222,18 @@ func Load(path string, quarantine func(srcPath, dstPath string) error) (*State, 
 	// Ensure the inbounds map is never nil.
 	if st.Inbounds == nil {
 		st.Inbounds = make(map[string]InboundState)
+	}
+	if st.Nodes == nil {
+		st.Nodes = make(map[string]NodeState)
+	}
+	if st.Version < CurrentVersion {
+		st.Version = CurrentVersion
+	}
+	for nodeID, node := range st.Nodes {
+		if node.Inbounds == nil {
+			node.Inbounds = make(map[string]InboundState)
+		}
+		st.Nodes[nodeID] = node
 	}
 	return &st, nil
 }

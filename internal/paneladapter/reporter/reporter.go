@@ -66,7 +66,7 @@ func WithConfigRevision(rev string) Option {
 // them to the panel with stable idempotency keys and durable retry.
 type Reporter struct {
 	client          *client.Client
-	store           *state.Store
+	store           state.Repository
 	tracker         *traffic.Tracker
 	nodeID          string
 	skipEmpty       bool
@@ -84,7 +84,7 @@ type Reporter struct {
 }
 
 // NewReporter creates a traffic reporter.
-func NewReporter(c *client.Client, store *state.Store, tracker *traffic.Tracker, nodeID string, opts ...Option) *Reporter {
+func NewReporter(c *client.Client, store state.Repository, tracker *traffic.Tracker, nodeID string, opts ...Option) *Reporter {
 	r := &Reporter{
 		client:    c,
 		store:     store,
