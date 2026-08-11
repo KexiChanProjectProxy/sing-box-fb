@@ -158,16 +158,22 @@ func (h *inboundHandler) NewConnectionEx(ctx context.Context, conn net.Conn, sou
 		h.userLock.RLock()
 		displayName, hasManaged := h.managedNames[userName]
 		h.userLock.RUnlock()
+		logUser := userName
 		if hasManaged {
 			metadata.UserID = userName
-			metadata.User = displayName
+			metadata.User = runtimeMetadataUser(userName)
+			logUser = displayName
 		} else {
 			metadata.UserID = userName
-			metadata.User = userName
+			metadata.User = runtimeMetadataUser(userName)
 		}
-		h.logger.InfoContext(ctx, "[", metadata.User, "] inbound connection to ", metadata.Destination)
+		h.logger.InfoContext(ctx, "[", logUser, "] inbound connection to ", metadata.Destination)
 	} else {
 		h.logger.InfoContext(ctx, "inbound connection to ", metadata.Destination)
 	}
 	h.router.RouteConnectionEx(ctx, conn, metadata, onClose)
+}
+
+func runtimeMetadataUser(userID string) string {
+	return userID
 }

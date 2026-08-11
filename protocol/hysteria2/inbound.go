@@ -244,21 +244,13 @@ func (h *Inbound) NewConnectionEx(ctx context.Context, conn net.Conn, source M.S
 	metadata.Source = source
 	metadata.Destination = destination
 	h.logger.InfoContext(ctx, "inbound connection from ", metadata.Source)
-	userID, _ := auth.UserFromContext[int](ctx)
+	userID, authenticated := auth.UserFromContext[int](ctx)
 	h.userLock.RLock()
-	userCount := len(h.userNameList)
-	panelUserID := ""
-	userNme := ""
-	if userID < userCount {
-		if userID < len(h.userIDList) {
-			panelUserID = h.userIDList[userID]
-		}
-		userNme = h.userNameList[userID]
-	}
+	panelUserID, userNme, knownUser := runtimeMetadataForUserIndex(authenticated, userID, h.userIDList, h.userNameList)
 	h.userLock.RUnlock()
-	if userNme != "" {
+	if knownUser {
 		metadata.UserID = panelUserID
-		metadata.User = userNme
+		metadata.User = runtimeMetadataUser(panelUserID)
 		h.logger.InfoContext(ctx, "[", userNme, "] inbound connection to ", metadata.Destination)
 	} else {
 		h.logger.InfoContext(ctx, "inbound connection to ", metadata.Destination)
@@ -278,26 +270,29 @@ func (h *Inbound) NewPacketConnectionEx(ctx context.Context, conn N.PacketConn, 
 	metadata.Source = source
 	metadata.Destination = destination
 	h.logger.InfoContext(ctx, "inbound packet connection from ", metadata.Source)
-	userID, _ := auth.UserFromContext[int](ctx)
+	userID, authenticated := auth.UserFromContext[int](ctx)
 	h.userLock.RLock()
-	userCount := len(h.userNameList)
-	panelUserID := ""
-	userNme := ""
-	if userID < userCount {
-		if userID < len(h.userIDList) {
-			panelUserID = h.userIDList[userID]
-		}
-		userNme = h.userNameList[userID]
-	}
+	panelUserID, userNme, knownUser := runtimeMetadataForUserIndex(authenticated, userID, h.userIDList, h.userNameList)
 	h.userLock.RUnlock()
-	if userNme != "" {
+	if knownUser {
 		metadata.UserID = panelUserID
-		metadata.User = userNme
+		metadata.User = runtimeMetadataUser(panelUserID)
 		h.logger.InfoContext(ctx, "[", userNme, "] inbound packet connection to ", metadata.Destination)
 	} else {
 		h.logger.InfoContext(ctx, "inbound packet connection to ", metadata.Destination)
 	}
 	h.router.RoutePacketConnectionEx(ctx, conn, metadata, onClose)
+}
+
+func runtimeMetadataUser(userID string) string {
+	return userID
+}
+
+func runtimeMetadataForUserIndex(authenticated bool, userIndex int, userIDs, displayNames []string) (string, string, bool) {
+	if !authenticated || userIndex < 0 || userIndex >= len(userIDs) || userIndex >= len(displayNames) || displayNames[userIndex] == "" {
+		return "", "", false
+	}
+	return userIDs[userIndex], displayNames[userIndex], true
 }
 
 func (h *Inbound) Start(stage adapter.StartStage) error {

@@ -32,6 +32,25 @@ func TestReplaceUsersBasic(t *testing.T) {
 	require.Equal(t, "bob", names[1])
 }
 
+func TestRuntimeMetadataUserUsesImmutableUserID(t *testing.T) {
+	userID := "01919f2e-3f59-7a64-8d66-d24b906e25b4"
+	require.Equal(t, userID, runtimeMetadataUser(userID))
+}
+
+func TestRuntimeMetadataForUserIndexRejectsUnauthenticatedZeroValue(t *testing.T) {
+	panelUserID, displayName, ok := runtimeMetadataForUserIndex(false, 0, []string{"u1"}, []string{"alice"})
+	require.False(t, ok)
+	require.Empty(t, panelUserID)
+	require.Empty(t, displayName)
+}
+
+func TestRuntimeMetadataForUserIndexUsesReplacementSnapshot(t *testing.T) {
+	panelUserID, displayName, ok := runtimeMetadataForUserIndex(true, 0, []string{"u2", "u1"}, []string{"bob", "alice"})
+	require.True(t, ok)
+	require.Equal(t, "u2", panelUserID)
+	require.Equal(t, "bob", displayName)
+}
+
 func TestReplaceUsersEmptyRemovesAll(t *testing.T) {
 	h := &Inbound{
 		userNameList: []string{"static-user"},

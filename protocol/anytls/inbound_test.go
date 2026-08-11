@@ -28,6 +28,11 @@ func TestReplaceUsersBasic(t *testing.T) {
 	require.Equal(t, "bob", names["u2"])
 }
 
+func TestRuntimeMetadataUserUsesImmutableUserID(t *testing.T) {
+	userID := "01919f2e-3f59-7a64-8d66-d24b906e25b4"
+	require.Equal(t, userID, runtimeMetadataUser(userID))
+}
+
 func TestReplaceUsersEmptyRemovesAll(t *testing.T) {
 	h := &Inbound{
 		managedNames: map[string]string{"old": "old-user"},
