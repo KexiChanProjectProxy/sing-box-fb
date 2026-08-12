@@ -183,6 +183,7 @@ func TestAgentMode_NoSecretLogging(t *testing.T) {
 			AgentID:          testAgentID,
 			ManifestRevision: 1,
 			Reconciliation:   contract.AgentManifestReconciliation{FullSnapshot: true, PollAfterSeconds: 30},
+			Capabilities:     contract.EnabledUserRoutingCapabilities(),
 			Nodes:            []contract.AgentManifestNode{},
 		})
 	}))
@@ -194,11 +195,14 @@ func TestAgentMode_NoSecretLogging(t *testing.T) {
 	}
 
 	// When
-	_, _, err = panelClient.FetchManifest(context.Background(), "")
+	manifest, _, err := panelClient.FetchManifest(context.Background(), "")
 
 	// Then
 	if err != nil {
 		t.Fatalf("FetchManifest() error = %v", err)
+	}
+	if manifest.Capabilities == nil || manifest.Capabilities.UserRouting == nil || !manifest.Capabilities.UserRouting.Supported {
+		t.Fatalf("manifest capabilities = %#v", manifest.Capabilities)
 	}
 	for _, entry := range captured.entries {
 		if strings.Contains(entry.message, secret) || strings.Contains(entry.message, "Bearer") {

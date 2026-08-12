@@ -23,6 +23,7 @@ type AgentManifest struct {
 	AgentID          string                      `json:"agent_id"`
 	ManifestRevision uint64                      `json:"manifest_revision"`
 	Reconciliation   AgentManifestReconciliation `json:"reconciliation"`
+	Capabilities     *AdapterCapabilities        `json:"capabilities,omitempty"`
 	Nodes            []AgentManifestNode         `json:"nodes"`
 }
 
