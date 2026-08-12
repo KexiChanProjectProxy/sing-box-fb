@@ -167,6 +167,9 @@ func TestAgentMode_RestartRecovery(t *testing.T) {
 	}
 	waitForCount(t, factory, "node-one", 1, 0)
 	waitForCount(t, factory, "node-two", 1, 0)
+	if store.State().Manifest.AppliedAt.IsZero() {
+		t.Fatal("restored manifest did not record applied_at")
+	}
 	controller.Close()
 }
 

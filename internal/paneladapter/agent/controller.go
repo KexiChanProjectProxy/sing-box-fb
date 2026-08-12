@@ -167,7 +167,9 @@ func (controller *Controller) Close() {
 func (controller *Controller) persistManifest(manifest *contract.AgentManifest) error {
 	return controller.store.UpdateAndSave(func(root *state.State) {
 		etag := root.Manifest.ETag
-		root.Manifest = state.ManifestState{ETag: etag, Snapshot: *manifest}
+		root.Manifest = state.ManifestState{
+			ETag: etag, Snapshot: *manifest, AppliedAt: time.Now().UTC(),
+		}
 		nodes := make(map[string]state.NodeState, len(manifest.Nodes))
 		for _, descriptor := range manifest.Nodes {
 			node := root.Nodes[descriptor.NodeID]

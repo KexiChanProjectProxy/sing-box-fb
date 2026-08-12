@@ -105,7 +105,7 @@ func runAgentAdapter(cfg *config.Config) error {
 	waitGroup.Add(1)
 	go func() {
 		defer waitGroup.Done()
-		runAgentHeartbeat(adapterContext, panelClient, store, cfg.AgentID, logger)
+		runAgentHeartbeat(adapterContext, panelClient, store, cfg, logger)
 	}()
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)

@@ -1,10 +1,16 @@
 package state
 
-import "github.com/sagernet/sing-box/internal/paneladapter/contract"
+import (
+	"time"
+
+	"github.com/sagernet/sing-box/internal/paneladapter/contract"
+)
 
 type ManifestState struct {
-	ETag     string                 `json:"etag,omitempty"`
-	Snapshot contract.AgentManifest `json:"snapshot"`
+	ETag       string                 `json:"etag,omitempty"`
+	Snapshot   contract.AgentManifest `json:"snapshot"`
+	AppliedAt  time.Time              `json:"applied_at,omitempty"`
+	ApplyError string                 `json:"apply_error,omitempty"`
 }
 
 type NodeState struct {
