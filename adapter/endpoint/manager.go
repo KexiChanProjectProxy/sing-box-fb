@@ -16,7 +16,7 @@ import (
 var _ adapter.EndpointManager = (*Manager)(nil)
 
 type Manager struct {
-	logger        log.ContextLogger
+	logger        log.StructuredLogger
 	registry      adapter.EndpointRegistry
 	access        sync.Mutex
 	started       bool
@@ -25,7 +25,7 @@ type Manager struct {
 	endpointByTag map[string]adapter.Endpoint
 }
 
-func NewManager(logger log.ContextLogger, registry adapter.EndpointRegistry) *Manager {
+func NewManager(logger log.StructuredLogger, registry adapter.EndpointRegistry) *Manager {
 	return &Manager{
 		logger:        logger,
 		registry:      registry,
@@ -47,7 +47,7 @@ func (m *Manager) Start(stage adapter.StartStage) error {
 	}
 	for _, endpoint := range m.endpoints {
 		name := "endpoint/" + endpoint.Type() + "[" + endpoint.Tag() + "]"
-		done := adapter.LogElapsed(m.logger, stage, " ", name)
+		done := adapter.LogElapsed(m.logger, stage.String()+" "+name)
 		err := adapter.LegacyStart(endpoint, stage)
 		done()
 		if err != nil {
@@ -70,7 +70,7 @@ func (m *Manager) Close() error {
 	var err error
 	for _, endpoint := range endpoints {
 		name := "endpoint/" + endpoint.Type() + "[" + endpoint.Tag() + "]"
-		done := adapter.LogElapsed(m.logger, "close ", name)
+		done := adapter.LogElapsed(m.logger, "close "+name)
 		monitor.Start("close ", name)
 		err = E.Append(err, endpoint.Close(), func(err error) error {
 			return E.Cause(err, "close ", name)
@@ -117,7 +117,7 @@ func (m *Manager) Remove(tag string) error {
 	return nil
 }
 
-func (m *Manager) Create(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, outboundType string, options any) error {
+func (m *Manager) Create(ctx context.Context, router adapter.Router, logger log.StructuredLogger, tag string, outboundType string, options any) error {
 	endpoint, err := m.registry.Create(ctx, router, logger, tag, outboundType, options)
 	if err != nil {
 		return err
@@ -127,7 +127,7 @@ func (m *Manager) Create(ctx context.Context, router adapter.Router, logger log.
 	if m.started {
 		name := "endpoint/" + endpoint.Type() + "[" + endpoint.Tag() + "]"
 		for _, stage := range adapter.ListStartStages {
-			done := adapter.LogElapsed(m.logger, stage, " ", name)
+			done := adapter.LogElapsed(m.logger, stage.String()+" "+name)
 			err = adapter.LegacyStart(endpoint, stage)
 			done()
 			if err != nil {

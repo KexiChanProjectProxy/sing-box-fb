@@ -14,21 +14,24 @@ import (
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing-box/protocol/naive"
-	"github.com/sagernet/sing-quic"
+	qtls "github.com/sagernet/sing-quic"
 	"github.com/sagernet/sing-quic/congestion_bbr1"
 	"github.com/sagernet/sing-quic/congestion_bbr2"
 	congestion_meta1 "github.com/sagernet/sing-quic/congestion_meta1"
 	congestion_meta2 "github.com/sagernet/sing-quic/congestion_meta2"
+	"github.com/sagernet/sing/common"
 	E "github.com/sagernet/sing/common/exceptions"
-	"github.com/sagernet/sing/common/logger"
 	"github.com/sagernet/sing/common/ntp"
 )
 
 func init() {
-	naive.ConfigureHTTP3ListenerFunc = func(ctx context.Context, logger logger.Logger, listener *listener.Listener, handler http.Handler, tlsConfig tls.ServerConfig, options option.NaiveInboundOptions) (io.Closer, error) {
+	naive.ConfigureHTTP3ListenerFunc = func(ctx context.Context, logger log.StructuredLogger, listener *listener.Listener, handler http.Handler, tlsConfig tls.ServerConfig, options option.NaiveInboundOptions) (io.Closer, error) {
 		err := qtls.ConfigureHTTP3(tlsConfig)
 		if err != nil {
 			return nil, err
+		}
+		if !common.Contains(tlsConfig.NextProtos(), http3.NextProtoH3) {
+			tlsConfig.SetNextProtos(append(append([]string{}, tlsConfig.NextProtos()...), http3.NextProtoH3))
 		}
 
 		udpConn, err := listener.ListenUDP()
@@ -118,7 +121,8 @@ func init() {
 			sErr := h3Server.ServeListener(quicListener)
 			udpConn.Close()
 			if sErr != nil && !E.IsClosedOrCanceled(sErr) {
-				logger.Error("http3 server closed: ", sErr)
+				logger.ErrorEvent("listener.closed", "listener closed", log.Err(sErr))
+
 			}
 		}()
 

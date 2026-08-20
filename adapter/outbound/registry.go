@@ -2,6 +2,8 @@ package outbound
 
 import (
 	"context"
+	"maps"
+	"slices"
 	"sync"
 
 	"github.com/sagernet/sing-box/adapter"
@@ -10,12 +12,12 @@ import (
 	E "github.com/sagernet/sing/common/exceptions"
 )
 
-type ConstructorFunc[T any] func(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options T) (adapter.Outbound, error)
+type ConstructorFunc[T any] func(ctx context.Context, router adapter.Router, logger log.StructuredLogger, tag string, options T) (adapter.Outbound, error)
 
 func Register[Options any](registry *Registry, outboundType string, constructor ConstructorFunc[Options]) {
 	registry.register(outboundType, func() any {
 		return new(Options)
-	}, func(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, rawOptions any) (adapter.Outbound, error) {
+	}, func(ctx context.Context, router adapter.Router, logger log.StructuredLogger, tag string, rawOptions any) (adapter.Outbound, error) {
 		var options *Options
 		if rawOptions != nil {
 			options = rawOptions.(*Options)
@@ -28,7 +30,7 @@ var _ adapter.OutboundRegistry = (*Registry)(nil)
 
 type (
 	optionsConstructorFunc func() any
-	constructorFunc        func(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options any) (adapter.Outbound, error)
+	constructorFunc        func(ctx context.Context, router adapter.Router, logger log.StructuredLogger, tag string, options any) (adapter.Outbound, error)
 )
 
 type Registry struct {
@@ -44,6 +46,12 @@ func NewRegistry() *Registry {
 	}
 }
 
+func (r *Registry) OptionTypes() []string {
+	r.access.Lock()
+	defer r.access.Unlock()
+	return slices.Sorted(maps.Keys(r.optionsType))
+}
+
 func (r *Registry) CreateOptions(outboundType string) (any, bool) {
 	r.access.Lock()
 	defer r.access.Unlock()
@@ -54,7 +62,7 @@ func (r *Registry) CreateOptions(outboundType string) (any, bool) {
 	return optionsConstructor(), true
 }
 
-func (r *Registry) CreateOutbound(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, outboundType string, options any) (adapter.Outbound, error) {
+func (r *Registry) CreateOutbound(ctx context.Context, router adapter.Router, logger log.StructuredLogger, tag string, outboundType string, options any) (adapter.Outbound, error) {
 	r.access.Lock()
 	defer r.access.Unlock()
 	constructor, loaded := r.constructors[outboundType]

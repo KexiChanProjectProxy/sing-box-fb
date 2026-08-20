@@ -10,8 +10,9 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/sagernet/sing-box/log"
+
 	singTun "github.com/sagernet/sing-tun"
-	"github.com/sagernet/sing/common/logger"
 	wgTun "github.com/sagernet/wireguard-go/tun"
 )
 
@@ -20,14 +21,14 @@ type tunDeviceAdapter struct {
 	linuxTUN   singTun.LinuxTUN
 	events     chan wgTun.Event
 	mtu        int
-	logger     logger.ContextLogger
+	logger     log.StructuredLogger
 	debugTun   bool
 	readCount  atomic.Uint32
 	writeCount atomic.Uint32
 	closeOnce  sync.Once
 }
 
-func newTunDeviceAdapter(tun singTun.Tun, mtu int, logger logger.ContextLogger) (wgTun.Device, error) {
+func newTunDeviceAdapter(tun singTun.Tun, mtu int, logger log.StructuredLogger) (wgTun.Device, error) {
 	if tun == nil {
 		return nil, os.ErrInvalid
 	}
@@ -151,5 +152,6 @@ func (a *tunDeviceAdapter) debugPacket(direction string, packet []byte) {
 	if len(sample) > 64 {
 		sample = sample[:64]
 	}
-	a.logger.Trace("tailscale tun ", direction, " len=", len(packet), " head=", hex.EncodeToString(sample))
+	a.logger.TraceEvent("tun.packet", "tailscale tun packet", log.String("op", direction), log.String("detail", hex.EncodeToString(sample)))
+
 }

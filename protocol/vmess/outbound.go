@@ -13,11 +13,10 @@ import (
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing-box/transport/v2ray"
-	"github.com/sagernet/sing-vmess"
+	vmess "github.com/sagernet/sing-vmess"
 	"github.com/sagernet/sing-vmess/packetaddr"
 	"github.com/sagernet/sing/common"
 	E "github.com/sagernet/sing/common/exceptions"
-	"github.com/sagernet/sing/common/logger"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
 	"github.com/sagernet/sing/common/ntp"
@@ -27,9 +26,11 @@ func RegisterOutbound(registry *outbound.Registry) {
 	outbound.Register[option.VMessOutboundOptions](registry, C.TypeVMess, NewOutbound)
 }
 
+var _ adapter.OutboundWithMultiplex = (*Outbound)(nil)
+
 type Outbound struct {
 	outbound.Adapter
-	logger          logger.ContextLogger
+	logger          log.StructuredLogger
 	dialer          N.Dialer
 	client          *vmess.Client
 	serverAddr      M.Socksaddr
@@ -41,7 +42,7 @@ type Outbound struct {
 	xudp            bool
 }
 
-func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.VMessOutboundOptions) (adapter.Outbound, error) {
+func NewOutbound(ctx context.Context, router adapter.Router, logger log.StructuredLogger, tag string, options option.VMessOutboundOptions) (adapter.Outbound, error) {
 	outboundDialer, err := dialer.New(ctx, options.DialerOptions, options.ServerIsDomain())
 	if err != nil {
 		return nil, err
@@ -105,6 +106,10 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 	return outbound, nil
 }
 
+func (h *Outbound) MultiplexEnabled() bool {
+	return h.multiplexDialer != nil
+}
+
 func (h *Outbound) InterfaceUpdated() {
 	if h.transport != nil {
 		h.transport.Close()
@@ -122,17 +127,21 @@ func (h *Outbound) DialContext(ctx context.Context, network string, destination 
 	if h.multiplexDialer == nil {
 		switch N.NetworkName(network) {
 		case N.NetworkTCP:
-			h.logger.InfoContext(ctx, "outbound connection to ", destination)
+			adapter.LogOutboundConnection(h.logger, ctx, destination)
+
 		case N.NetworkUDP:
-			h.logger.InfoContext(ctx, "outbound packet connection to ", destination)
+			adapter.LogOutboundPacket(h.logger, ctx, destination)
+
 		}
 		return (*vmessDialer)(h).DialContext(ctx, network, destination)
 	} else {
 		switch N.NetworkName(network) {
 		case N.NetworkTCP:
-			h.logger.InfoContext(ctx, "outbound multiplex connection to ", destination)
+			adapter.LogOutboundConnection(h.logger, ctx, destination)
+
 		case N.NetworkUDP:
-			h.logger.InfoContext(ctx, "outbound multiplex packet connection to ", destination)
+			adapter.LogOutboundPacket(h.logger, ctx, destination)
+
 		}
 		return h.multiplexDialer.DialContext(ctx, network, destination)
 	}
@@ -140,10 +149,12 @@ func (h *Outbound) DialContext(ctx context.Context, network string, destination 
 
 func (h *Outbound) ListenPacket(ctx context.Context, destination M.Socksaddr) (net.PacketConn, error) {
 	if h.multiplexDialer == nil {
-		h.logger.InfoContext(ctx, "outbound packet connection to ", destination)
+		adapter.LogOutboundPacket(h.logger, ctx, destination)
+
 		return (*vmessDialer)(h).ListenPacket(ctx, destination)
 	} else {
-		h.logger.InfoContext(ctx, "outbound multiplex packet connection to ", destination)
+		adapter.LogOutboundPacket(h.logger, ctx, destination)
+
 		return h.multiplexDialer.ListenPacket(ctx, destination)
 	}
 }

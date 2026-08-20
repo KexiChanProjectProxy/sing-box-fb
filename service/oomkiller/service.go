@@ -26,16 +26,18 @@ func RegisterService(registry *boxService.Registry) {
 type Service struct {
 	boxService.Adapter
 	ctx            context.Context
-	logger         log.ContextLogger
+	logger         log.StructuredLogger
 	network        adapter.NetworkManager
 	timerConfig    timerConfig
 	adaptiveTimer  *adaptiveTimer
 	lastReportTime atomic.Int64
 	//nolint:unused // touched only on darwin && cgo via writeOOMDraft/discardOOMDraft.
+	lastDraftTime atomic.Int64
+	//nolint:unused // touched only on darwin && cgo via writeOOMDraft/discardOOMDraft.
 	draftCancelled atomic.Bool
 }
 
-func NewService(ctx context.Context, logger log.ContextLogger, tag string, options option.OOMKillerServiceOptions) (adapter.Service, error) {
+func NewService(ctx context.Context, logger log.StructuredLogger, tag string, options option.OOMKillerServiceOptions) (adapter.Service, error) {
 	memoryLimit, mode := resolvePolicyMode(ctx, options)
 	config, err := buildTimerConfig(options, memoryLimit, mode, options.KillerDisabled)
 	if err != nil {
@@ -48,21 +50,6 @@ func NewService(ctx context.Context, logger log.ContextLogger, tag string, optio
 		network:     service.FromContext[adapter.NetworkManager](ctx),
 		timerConfig: config,
 	}, nil
-}
-
-func (s *Service) createTimer() {
-	s.adaptiveTimer = newAdaptiveTimer(s.logger, s.network, s.timerConfig, s.writeOOMReport)
-}
-
-func (s *Service) startTimer() {
-	s.createTimer()
-	s.adaptiveTimer.start()
-}
-
-func (s *Service) stopTimer() {
-	if s.adaptiveTimer != nil {
-		s.adaptiveTimer.stop()
-	}
 }
 
 func (s *Service) writeOOMReport(memoryUsage uint64) {
@@ -80,8 +67,8 @@ func (s *Service) writeOOMReport(memoryUsage uint64) {
 	}
 	err := reporter.WriteReport(memoryUsage)
 	if err != nil {
-		s.logger.Warn("failed to write OOM report: ", err)
+		s.logger.WarnEvent("oom.report.write.error", "failed to write OOM report", log.Err(err))
 	} else {
-		s.logger.Info("OOM report saved")
+		s.logger.InfoEvent("oom.report.saved", "OOM report saved")
 	}
 }

@@ -14,7 +14,7 @@ import (
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
-	"github.com/sagernet/sing-tun"
+	"github.com/sagernet/sing-box/route"
 	"github.com/sagernet/sing/common"
 	"github.com/sagernet/sing/common/batch"
 	E "github.com/sagernet/sing/common/exceptions"
@@ -29,14 +29,18 @@ func RegisterURLTest(registry *outbound.Registry) {
 	outbound.Register[option.URLTestOutboundOptions](registry, C.TypeURLTest, NewURLTest)
 }
 
-var _ adapter.OutboundGroup = (*URLTest)(nil)
+var (
+	_ adapter.OutboundGroup            = (*URLTest)(nil)
+	_ adapter.InterfaceUpdateListener  = (*URLTest)(nil)
+	_ adapter.OutboundWithPreferDomain = (*URLTest)(nil)
+)
 
 type URLTest struct {
 	outbound.Adapter
 	ctx                          context.Context
 	outbound                     adapter.OutboundManager
 	connection                   adapter.ConnectionManager
-	logger                       log.ContextLogger
+	logger                       log.StructuredLogger
 	tags                         []string
 	link                         string
 	interval                     time.Duration
@@ -44,9 +48,10 @@ type URLTest struct {
 	idleTimeout                  time.Duration
 	group                        *URLTestGroup
 	interruptExternalConnections bool
+	preferDomain                 bool
 }
 
-func NewURLTest(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.URLTestOutboundOptions) (adapter.Outbound, error) {
+func NewURLTest(ctx context.Context, router adapter.Router, logger log.StructuredLogger, tag string, options option.URLTestOutboundOptions) (adapter.Outbound, error) {
 	outbound := &URLTest{
 		Adapter:                      outbound.NewAdapter(C.TypeURLTest, tag, []string{N.NetworkTCP, N.NetworkUDP}, options.Outbounds),
 		ctx:                          ctx,
@@ -59,11 +64,16 @@ func NewURLTest(ctx context.Context, router adapter.Router, logger log.ContextLo
 		tolerance:                    options.Tolerance,
 		idleTimeout:                  time.Duration(options.IdleTimeout),
 		interruptExternalConnections: options.InterruptExistConnections,
+		preferDomain:                 options.PreferDomain,
 	}
 	if len(outbound.tags) == 0 {
 		return nil, E.New("missing tags")
 	}
 	return outbound, nil
+}
+
+func (s *URLTest) PreferDomain() bool {
+	return s.preferDomain
 }
 
 func (s *URLTest) Start() error {
@@ -115,8 +125,22 @@ func (s *URLTest) CheckOutbounds() {
 	s.group.CheckOutbounds(true)
 }
 
+func (s *URLTest) InterfaceUpdated() {
+	group := s.group
+	if group == nil {
+		return
+	}
+	if group.pause.IsDevicePaused() || group.pause.IsNetworkPaused() {
+		return
+	}
+	go group.CheckOutbounds(true)
+}
+
 func (s *URLTest) DialContext(ctx context.Context, network string, destination M.Socksaddr) (net.Conn, error) {
 	s.group.Touch()
+	if s.preferDomain || adapter.PreferDomainFromContext(ctx) {
+		ctx = adapter.ContextWithPreferDomain(ctx, true)
+	}
 	var outbound adapter.Outbound
 	switch N.NetworkName(network) {
 	case N.NetworkTCP:
@@ -136,13 +160,17 @@ func (s *URLTest) DialContext(ctx context.Context, network string, destination M
 	if err == nil {
 		return s.group.interruptGroup.NewConn(conn, interrupt.IsExternalConnectionFromContext(ctx)), nil
 	}
-	s.logger.ErrorContext(ctx, err)
+	s.logger.ErrorEventContext(ctx, "urltest.error", "urltest error", log.Err(err), log.String("tag", outbound.Tag()))
+
 	s.group.history.DeleteURLTestHistory(outbound.Tag())
 	return nil, err
 }
 
 func (s *URLTest) ListenPacket(ctx context.Context, destination M.Socksaddr) (net.PacketConn, error) {
 	s.group.Touch()
+	if s.preferDomain || adapter.PreferDomainFromContext(ctx) {
+		ctx = adapter.ContextWithPreferDomain(ctx, true)
+	}
 	outbound := s.group.selectedOutboundUDP
 	if outbound == nil {
 		outbound, _ = s.group.Select(N.NetworkUDP)
@@ -154,34 +182,26 @@ func (s *URLTest) ListenPacket(ctx context.Context, destination M.Socksaddr) (ne
 	if err == nil {
 		return s.group.interruptGroup.NewPacketConn(conn, interrupt.IsExternalConnectionFromContext(ctx)), nil
 	}
-	s.logger.ErrorContext(ctx, err)
+	s.logger.ErrorEventContext(ctx, "urltest.error", "urltest error", log.Err(err), log.String("tag", outbound.Tag()))
+
 	s.group.history.DeleteURLTestHistory(outbound.Tag())
 	return nil, err
 }
 
 func (s *URLTest) NewConnection(ctx context.Context, conn net.Conn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) {
 	ctx = interrupt.ContextWithIsExternalConnection(ctx)
+	if s.preferDomain || adapter.PreferDomainFromContext(ctx) {
+		ctx = route.ApplyPreferDomain(ctx, &metadata, s)
+	}
 	s.connection.NewConnection(ctx, s, conn, metadata, onClose)
 }
 
 func (s *URLTest) NewPacketConnection(ctx context.Context, conn N.PacketConn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) {
 	ctx = interrupt.ContextWithIsExternalConnection(ctx)
+	if s.preferDomain || adapter.PreferDomainFromContext(ctx) {
+		ctx = route.ApplyPreferDomain(ctx, &metadata, s)
+	}
 	s.connection.NewPacketConnection(ctx, s, conn, metadata, onClose)
-}
-
-func (s *URLTest) NewDirectRouteConnection(metadata adapter.InboundContext, routeContext tun.DirectRouteContext, timeout time.Duration) (tun.DirectRouteDestination, error) {
-	s.group.Touch()
-	selected := s.group.selectedOutboundTCP
-	if selected == nil {
-		selected, _ = s.group.Select(N.NetworkTCP)
-	}
-	if selected == nil {
-		return nil, E.New("missing supported outbound")
-	}
-	if !common.Contains(selected.Network(), metadata.Network) {
-		return nil, E.New(metadata.Network, " is not supported by outbound: ", selected.Tag())
-	}
-	return selected.(adapter.DirectRouteOutbound).NewDirectRouteConnection(metadata, routeContext, timeout)
 }
 
 type URLTestGroup struct {
@@ -189,7 +209,7 @@ type URLTestGroup struct {
 	outbound                     adapter.OutboundManager
 	pause                        pause.Manager
 	pauseCallback                *list.Element[pause.Callback]
-	logger                       log.Logger
+	logger                       log.StructuredLogger
 	outbounds                    []adapter.Outbound
 	link                         string
 	interval                     time.Duration
@@ -201,6 +221,7 @@ type URLTestGroup struct {
 	selectedOutboundUDP          adapter.Outbound
 	interruptGroup               *interrupt.Group
 	interruptExternalConnections bool
+	updateCallback               func()
 	access                       sync.Mutex
 	ticker                       *time.Ticker
 	close                        chan struct{}
@@ -208,7 +229,7 @@ type URLTestGroup struct {
 	lastActive                   common.TypedValue[time.Time]
 }
 
-func NewURLTestGroup(ctx context.Context, outboundManager adapter.OutboundManager, logger log.Logger, outbounds []adapter.Outbound, link string, interval time.Duration, tolerance uint16, idleTimeout time.Duration, interruptExternalConnections bool) (*URLTestGroup, error) {
+func NewURLTestGroup(ctx context.Context, outboundManager adapter.OutboundManager, logger log.StructuredLogger, outbounds []adapter.Outbound, link string, interval time.Duration, tolerance uint16, idleTimeout time.Duration, interruptExternalConnections bool) (*URLTestGroup, error) {
 	if interval == 0 {
 		interval = C.DefaultURLTestInterval
 	}
@@ -387,10 +408,12 @@ func (g *URLTestGroup) urlTest(ctx context.Context, force bool) (map[string]uint
 			defer cancel()
 			t, err := urltest.URLTest(testCtx, g.link, p)
 			if err != nil {
-				g.logger.Debug("outbound ", tag, " unavailable: ", err)
+				g.logger.DebugEvent("urltest.error", "urltest error", log.Err(err), log.String("tag", tag))
+
 				g.history.DeleteURLTestHistory(realTag)
 			} else {
-				g.logger.Debug("outbound ", tag, " available: ", t, "ms")
+				g.logger.DebugEvent("urltest.result", "urltest result", log.String("tag", tag), log.Int64("latency_ms", int64(t)))
+
 				g.history.StoreURLTestHistory(realTag, &adapter.URLTestHistory{
 					Time:  time.Now(),
 					Delay: t,
@@ -404,6 +427,9 @@ func (g *URLTestGroup) urlTest(ctx context.Context, force bool) (map[string]uint
 	}
 	b.Wait()
 	g.performUpdateCheck()
+	if g.updateCallback != nil {
+		g.updateCallback()
+	}
 	return result, nil
 }
 

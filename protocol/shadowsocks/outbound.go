@@ -12,11 +12,10 @@ import (
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing-box/transport/sip003"
-	"github.com/sagernet/sing-shadowsocks2"
+	shadowsocks "github.com/sagernet/sing-shadowsocks2"
 	"github.com/sagernet/sing/common"
 	"github.com/sagernet/sing/common/bufio"
 	E "github.com/sagernet/sing/common/exceptions"
-	"github.com/sagernet/sing/common/logger"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
 	"github.com/sagernet/sing/common/uot"
@@ -26,9 +25,11 @@ func RegisterOutbound(registry *outbound.Registry) {
 	outbound.Register[option.ShadowsocksOutboundOptions](registry, C.TypeShadowsocks, NewOutbound)
 }
 
+var _ adapter.OutboundWithMultiplex = (*Outbound)(nil)
+
 type Outbound struct {
 	outbound.Adapter
-	logger          logger.ContextLogger
+	logger          log.StructuredLogger
 	dialer          N.Dialer
 	method          shadowsocks.Method
 	serverAddr      M.Socksaddr
@@ -37,7 +38,7 @@ type Outbound struct {
 	multiplexDialer *mux.Client
 }
 
-func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.ShadowsocksOutboundOptions) (adapter.Outbound, error) {
+func NewOutbound(ctx context.Context, router adapter.Router, logger log.StructuredLogger, tag string, options option.ShadowsocksOutboundOptions) (adapter.Outbound, error) {
 	method, err := shadowsocks.CreateMethod(ctx, options.Method, shadowsocks.MethodOptions{
 		Password: options.Password,
 	})
@@ -84,22 +85,27 @@ func (h *Outbound) DialContext(ctx context.Context, network string, destination 
 	if h.multiplexDialer == nil {
 		switch N.NetworkName(network) {
 		case N.NetworkTCP:
-			h.logger.InfoContext(ctx, "outbound connection to ", destination)
+			adapter.LogOutboundConnection(h.logger, ctx, destination)
+
 		case N.NetworkUDP:
 			if h.uotClient != nil {
-				h.logger.InfoContext(ctx, "outbound UoT connect packet connection to ", destination)
+				adapter.LogOutboundPacket(h.logger, ctx, destination)
+
 				return h.uotClient.DialContext(ctx, network, destination)
 			} else {
-				h.logger.InfoContext(ctx, "outbound packet connection to ", destination)
+				adapter.LogOutboundPacket(h.logger, ctx, destination)
+
 			}
 		}
 		return (*shadowsocksDialer)(h).DialContext(ctx, network, destination)
 	} else {
 		switch N.NetworkName(network) {
 		case N.NetworkTCP:
-			h.logger.InfoContext(ctx, "outbound multiplex connection to ", destination)
+			adapter.LogOutboundConnection(h.logger, ctx, destination)
+
 		case N.NetworkUDP:
-			h.logger.InfoContext(ctx, "outbound multiplex packet connection to ", destination)
+			adapter.LogOutboundPacket(h.logger, ctx, destination)
+
 		}
 		return h.multiplexDialer.DialContext(ctx, network, destination)
 	}
@@ -111,17 +117,18 @@ func (h *Outbound) ListenPacket(ctx context.Context, destination M.Socksaddr) (n
 	metadata.Destination = destination
 	if h.multiplexDialer == nil {
 		if h.uotClient != nil {
-			h.logger.InfoContext(ctx, "outbound UoT packet connection to ", destination)
+			adapter.LogOutboundPacket(h.logger, ctx, destination)
 			return h.uotClient.ListenPacket(ctx, destination)
-		} else {
-			h.logger.InfoContext(ctx, "outbound packet connection to ", destination)
 		}
-		h.logger.InfoContext(ctx, "outbound packet connection to ", destination)
+		adapter.LogOutboundPacket(h.logger, ctx, destination)
 		return (*shadowsocksDialer)(h).ListenPacket(ctx, destination)
-	} else {
-		h.logger.InfoContext(ctx, "outbound multiplex packet connection to ", destination)
-		return h.multiplexDialer.ListenPacket(ctx, destination)
 	}
+	adapter.LogOutboundPacket(h.logger, ctx, destination)
+	return h.multiplexDialer.ListenPacket(ctx, destination)
+}
+
+func (h *Outbound) MultiplexEnabled() bool {
+	return h.multiplexDialer != nil
 }
 
 func (h *Outbound) InterfaceUpdated() {

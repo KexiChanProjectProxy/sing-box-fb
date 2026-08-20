@@ -15,6 +15,7 @@ import (
 	"github.com/sagernet/sing-box/internal/paneladapter/config"
 	"github.com/sagernet/sing-box/internal/paneladapter/contract"
 	"github.com/sagernet/sing-box/internal/paneladapter/state"
+	"github.com/sagernet/sing-box/log"
 )
 
 // ---------------------------------------------------------------------------
@@ -424,6 +425,37 @@ func (l *testLogger) WarnContext(ctx context.Context, args ...interface{}) {
 func (l *testLogger) ErrorContext(ctx context.Context, args ...interface{}) {}
 func (l *testLogger) FatalContext(ctx context.Context, args ...interface{}) {}
 func (l *testLogger) PanicContext(ctx context.Context, args ...interface{}) {}
+
+func (l *testLogger) TraceEvent(event string, message string, fields ...log.Field) {}
+func (l *testLogger) DebugEvent(event string, message string, fields ...log.Field) {
+	l.debugs = append(l.debugs, message)
+}
+func (l *testLogger) InfoEvent(event string, message string, fields ...log.Field) {
+	l.infos = append(l.infos, message)
+}
+func (l *testLogger) WarnEvent(event string, message string, fields ...log.Field) {
+	l.warns = append(l.warns, message)
+}
+func (l *testLogger) ErrorEvent(event string, message string, fields ...log.Field) {}
+func (l *testLogger) FatalEvent(event string, message string, fields ...log.Field) {}
+func (l *testLogger) PanicEvent(event string, message string, fields ...log.Field) {}
+func (l *testLogger) TraceEventContext(ctx context.Context, event string, message string, fields ...log.Field) {
+}
+func (l *testLogger) DebugEventContext(ctx context.Context, event string, message string, fields ...log.Field) {
+	l.debugs = append(l.debugs, message)
+}
+func (l *testLogger) InfoEventContext(ctx context.Context, event string, message string, fields ...log.Field) {
+	l.infos = append(l.infos, message)
+}
+func (l *testLogger) WarnEventContext(ctx context.Context, event string, message string, fields ...log.Field) {
+	l.warns = append(l.warns, message)
+}
+func (l *testLogger) ErrorEventContext(ctx context.Context, event string, message string, fields ...log.Field) {
+}
+func (l *testLogger) FatalEventContext(ctx context.Context, event string, message string, fields ...log.Field) {
+}
+func (l *testLogger) PanicEventContext(ctx context.Context, event string, message string, fields ...log.Field) {
+}
 
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsSubstr(s, substr))

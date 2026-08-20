@@ -9,7 +9,6 @@ import (
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
 	E "github.com/sagernet/sing/common/exceptions"
-	"github.com/sagernet/sing/common/logger"
 	"github.com/sagernet/sing/service"
 
 	"github.com/miekg/dns"
@@ -18,6 +17,7 @@ import (
 type DNSRouter interface {
 	Lifecycle
 	Exchange(ctx context.Context, message *dns.Msg, options DNSQueryOptions) (*dns.Msg, error)
+	ExchangeAsync(ctx context.Context, message *dns.Msg, options DNSQueryOptions, callback func(response *dns.Msg, err error))
 	Lookup(ctx context.Context, domain string, options DNSQueryOptions) ([]netip.Addr, error)
 	ClearCache()
 	LookupReverseMapping(ip netip.Addr) (string, bool)
@@ -27,6 +27,7 @@ type DNSRouter interface {
 type DNSClient interface {
 	Start()
 	Exchange(ctx context.Context, transport DNSTransport, message *dns.Msg, options DNSQueryOptions, responseChecker func(response *dns.Msg) bool) (*dns.Msg, error)
+	ExchangeAsync(ctx context.Context, transport DNSTransport, message *dns.Msg, options DNSQueryOptions, responseChecker func(response *dns.Msg) bool, callback func(response *dns.Msg, err error))
 	Lookup(ctx context.Context, transport DNSTransport, domain string, options DNSQueryOptions, responseChecker func(response *dns.Msg) bool) ([]netip.Addr, error)
 	ClearCache()
 }
@@ -65,13 +66,13 @@ func DNSQueryOptionsFrom(ctx context.Context, options *option.DomainResolveOptio
 type RDRCStore interface {
 	LoadRDRC(transportName string, qName string, qType uint16) (rejected bool)
 	SaveRDRC(transportName string, qName string, qType uint16) error
-	SaveRDRCAsync(transportName string, qName string, qType uint16, logger logger.Logger)
+	SaveRDRCAsync(transportName string, qName string, qType uint16, logger log.StructuredLogger)
 }
 
 type DNSCacheStore interface {
 	LoadDNSCache(transportName string, qName string, qType uint16) (rawMessage []byte, expireAt time.Time, loaded bool)
 	SaveDNSCache(transportName string, qName string, qType uint16, rawMessage []byte, expireAt time.Time) error
-	SaveDNSCacheAsync(transportName string, qName string, qType uint16, rawMessage []byte, expireAt time.Time, logger logger.Logger)
+	SaveDNSCacheAsync(transportName string, qName string, qType uint16, rawMessage []byte, expireAt time.Time, logger log.StructuredLogger)
 	ClearDNSCache() error
 }
 
@@ -84,6 +85,7 @@ type DNSTransport interface {
 	// Exchanges that are currently using those connections may fail.
 	Reset()
 	Exchange(ctx context.Context, message *dns.Msg) (*dns.Msg, error)
+	ExchangeAsync(ctx context.Context, message *dns.Msg, callback func(response *dns.Msg, err error))
 }
 
 type DNSTransportWithPreferredDomain interface {
@@ -93,7 +95,7 @@ type DNSTransportWithPreferredDomain interface {
 
 type DNSTransportRegistry interface {
 	option.DNSTransportOptionsRegistry
-	CreateDNSTransport(ctx context.Context, logger log.ContextLogger, tag string, transportType string, options any) (DNSTransport, error)
+	CreateDNSTransport(ctx context.Context, logger log.StructuredLogger, tag string, transportType string, options any) (DNSTransport, error)
 }
 
 type DNSTransportManager interface {
@@ -103,5 +105,5 @@ type DNSTransportManager interface {
 	Default() DNSTransport
 	FakeIP() FakeIPTransport
 	Remove(tag string) error
-	Create(ctx context.Context, logger log.ContextLogger, tag string, outboundType string, options any) error
+	Create(ctx context.Context, logger log.StructuredLogger, tag string, outboundType string, options any) error
 }

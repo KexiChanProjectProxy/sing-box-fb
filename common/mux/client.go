@@ -4,19 +4,20 @@ import (
 	"context"
 	"net"
 
+	"github.com/sagernet/sing-box/log"
+
 	"github.com/sagernet/sing-box/adapter"
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/option"
-	"github.com/sagernet/sing-mux"
+	mux "github.com/sagernet/sing-mux"
 	E "github.com/sagernet/sing/common/exceptions"
-	"github.com/sagernet/sing/common/logger"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
 )
 
 type Client = mux.Client
 
-func NewClientWithOptions(dialer N.Dialer, logger logger.Logger, options option.OutboundMultiplexOptions) (*Client, error) {
+func NewClientWithOptions(dialer N.Dialer, logger log.StructuredLogger, options option.OutboundMultiplexOptions) (*Client, error) {
 	if !options.Enabled {
 		return nil, nil
 	}

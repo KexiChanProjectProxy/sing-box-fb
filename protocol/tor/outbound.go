@@ -17,11 +17,10 @@ import (
 	"github.com/sagernet/sing/common"
 	E "github.com/sagernet/sing/common/exceptions"
 	F "github.com/sagernet/sing/common/format"
-	"github.com/sagernet/sing/common/logger"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
-	"github.com/sagernet/sing/common/rw"
 	"github.com/sagernet/sing/protocol/socks"
+	"github.com/sagernet/sing/service/filemanager"
 
 	"github.com/cretz/bine/control"
 	"github.com/cretz/bine/tor"
@@ -34,7 +33,8 @@ func RegisterOutbound(registry *outbound.Registry) {
 type Outbound struct {
 	outbound.Adapter
 	ctx         context.Context
-	logger      logger.ContextLogger
+	logger      log.StructuredLogger
+	dialer      N.Dialer
 	proxy       *proxybridge.Bridge
 	startConf   *tor.StartConf
 	options     map[string]string
@@ -44,43 +44,44 @@ type Outbound struct {
 }
 
 func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.TorOutboundOptions) (adapter.Outbound, error) {
+	err := adapter.CheckSecurityFeature(ctx, "Tor outbound")
+	if err != nil {
+		return nil, err
+	}
 	var startConf tor.StartConf
 	startConf.DataDir = os.ExpandEnv(options.DataDirectory)
-	startConf.TempDataDirBase = os.TempDir()
-	startConf.ExtraArgs = options.ExtraArgs
-	if options.DataDirectory != "" {
+	if startConf.DataDir != "" {
+		startConf.DataDir = filemanager.BasePath(ctx, startConf.DataDir)
+	}
+	startConf.TempDataDirBase = filemanager.TempPath(ctx)
+	if startConf.DataDir != "" {
 		dataDirAbs, _ := filepath.Abs(startConf.DataDir)
-		if geoIPPath := filepath.Join(dataDirAbs, "geoip"); rw.IsFile(geoIPPath) && !common.Contains(options.ExtraArgs, "--GeoIPFile") {
+		geoIPPath := filepath.Join(dataDirAbs, "geoip")
+		geoIPInfo, err := filemanager.Stat(ctx, geoIPPath)
+		if err == nil && !geoIPInfo.IsDir() && !common.Contains(options.ExtraArgs, "--GeoIPFile") {
 			options.ExtraArgs = append(options.ExtraArgs, "--GeoIPFile", geoIPPath)
 		}
-		if geoIP6Path := filepath.Join(dataDirAbs, "geoip6"); rw.IsFile(geoIP6Path) && !common.Contains(options.ExtraArgs, "--GeoIPv6File") {
+		geoIP6Path := filepath.Join(dataDirAbs, "geoip6")
+		geoIP6Info, err := filemanager.Stat(ctx, geoIP6Path)
+		if err == nil && !geoIP6Info.IsDir() && !common.Contains(options.ExtraArgs, "--GeoIPv6File") {
 			options.ExtraArgs = append(options.ExtraArgs, "--GeoIPv6File", geoIP6Path)
 		}
+		torrcFile := filepath.Join(startConf.DataDir, "torrc")
+		torrcInfo, err := filemanager.Stat(ctx, torrcFile)
+		if err != nil && !os.IsNotExist(err) {
+			return nil, err
+		} else if err == nil && torrcInfo.IsDir() {
+			return nil, E.New("Tor configuration path is a directory: ", torrcFile)
+		}
+		startConf.TorrcFile = torrcFile
 	}
+	startConf.ExtraArgs = options.ExtraArgs
 	if options.ExecutablePath != "" {
 		startConf.ExePath = options.ExecutablePath
 		startConf.ProcessCreator = nil
 		startConf.UseEmbeddedControlConn = false
 	}
-	if startConf.DataDir != "" {
-		torrcFile := filepath.Join(startConf.DataDir, "torrc")
-		err := rw.MkdirParent(torrcFile)
-		if err != nil {
-			return nil, err
-		}
-		if !rw.IsFile(torrcFile) {
-			err := os.WriteFile(torrcFile, []byte(""), 0o600)
-			if err != nil {
-				return nil, err
-			}
-		}
-		startConf.TorrcFile = torrcFile
-	}
 	outboundDialer, err := dialer.New(ctx, options.DialerOptions, false)
-	if err != nil {
-		return nil, err
-	}
-	proxy, err := proxybridge.New(ctx, logger, "proxy", outboundDialer)
 	if err != nil {
 		return nil, err
 	}
@@ -88,18 +89,50 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 		Adapter:   outbound.NewAdapterWithDialerOptions(C.TypeTor, tag, []string{N.NetworkTCP}, options.DialerOptions),
 		ctx:       ctx,
 		logger:    logger,
-		proxy:     proxy,
+		dialer:    outboundDialer,
 		startConf: &startConf,
 		options:   options.Options,
 	}, nil
 }
 
-func (t *Outbound) Start() error {
-	err := t.start()
-	if err != nil {
-		t.Close()
+func (t *Outbound) Start(stage adapter.StartStage) error {
+	switch stage {
+	case adapter.StartStateInitialize:
+		if t.startConf.DataDir == "" {
+			return nil
+		}
+		err := filemanager.MkdirAll(t.ctx, t.startConf.DataDir, 0o755)
+		if err != nil {
+			return err
+		}
+		torrcInfo, err := filemanager.Stat(t.ctx, t.startConf.TorrcFile)
+		if os.IsNotExist(err) {
+			err = filemanager.WriteFile(t.ctx, t.startConf.TorrcFile, []byte(""), 0o600)
+			if err != nil {
+				return err
+			}
+		} else if err != nil {
+			return err
+		} else if torrcInfo.IsDir() {
+			return E.New("Tor configuration path is a directory: ", t.startConf.TorrcFile)
+		}
+	case adapter.StartStateStart:
+		proxy, err := proxybridge.New(t.ctx, t.logger, "proxy", t.dialer)
+		if err != nil {
+			return err
+		}
+		t.proxy = proxy
+		err = proxy.Start()
+		if err != nil {
+			return err
+		}
+		err = t.start()
+		if err != nil {
+			t.Close()
+			return err
+		}
 	}
-	return err
+	return nil
 }
 
 var torLogEvents = []control.EventCode{
@@ -125,9 +158,12 @@ func (t *Outbound) start() error {
 	proxyPort := "127.0.0.1:" + F.ToString(t.proxy.Port())
 	proxyUsername := t.proxy.Username()
 	proxyPassword := t.proxy.Password()
-	t.logger.Trace("created upstream proxy at ", proxyPort)
-	t.logger.Trace("upstream proxy username ", proxyUsername)
-	t.logger.Trace("upstream proxy password ", proxyPassword)
+	t.logger.TraceEvent("tor.proxy.created", "created upstream proxy", log.String("listen", proxyPort))
+
+	t.logger.TraceEvent("tor.proxy.auth", "upstream proxy username", log.String("user", proxyUsername))
+
+	t.logger.TraceEvent("tor.proxy.auth", "upstream proxy password", log.String("detail", proxyPassword))
+
 	confOptions := []*control.KeyVal{
 		control.NewKeyVal("Socks5Proxy", proxyPort),
 		control.NewKeyVal("Socks5ProxyUsername", proxyUsername),
@@ -162,7 +198,8 @@ func (t *Outbound) start() error {
 	if len(info) != 1 || info[0].Key != "net/listeners/socks" {
 		return E.New("get socks proxy address")
 	}
-	t.logger.Trace("obtained tor socks5 address ", info[0].Val)
+	t.logger.TraceEvent("tor.socks.ready", "obtained tor socks5 address", log.String("listen", info[0].Val))
+
 	// TODO: set password for tor socks5 server if supported
 	t.socksClient = socks.NewClient(N.SystemDialer, M.ParseSocksaddr(info[0].Val), socks.Version5, "", "")
 	return nil
@@ -175,17 +212,22 @@ func (t *Outbound) recvLoop() {
 			event.Raw = strings.ToLower(event.Raw)
 			switch event.Severity {
 			case control.EventCodeLogDebug, control.EventCodeLogInfo:
-				t.logger.Trace(event.Raw)
+				t.logger.TraceEvent("tor.log", "tor log", log.String("detail", event.Raw))
+
 			case control.EventCodeLogNotice:
 				if strings.Contains(event.Raw, "disablenetwork") || strings.Contains(event.Raw, "socks listener") {
-					t.logger.Trace(event.Raw)
+					t.logger.TraceEvent("tor.log", "tor log", log.String("detail", event.Raw))
+
 					continue
 				}
-				t.logger.Info(event.Raw)
+				t.logger.InfoEvent("tor.log", "tor log", log.String("detail", event.Raw))
+
 			case control.EventCodeLogWarn:
-				t.logger.Warn(event.Raw)
+				t.logger.WarnEvent("tor.log", "tor log", log.String("detail", event.Raw))
+
 			case control.EventCodeLogErr:
-				t.logger.Error(event.Raw)
+				t.logger.ErrorEvent("tor.log", "tor log", log.String("detail", event.Raw))
+
 			}
 		}
 	}
@@ -204,7 +246,8 @@ func (t *Outbound) Close() error {
 }
 
 func (t *Outbound) DialContext(ctx context.Context, network string, destination M.Socksaddr) (net.Conn, error) {
-	t.logger.InfoContext(ctx, "outbound connection to ", destination)
+	adapter.LogOutboundConnection(t.logger, ctx, destination)
+
 	return t.socksClient.DialContext(ctx, network, destination)
 }
 

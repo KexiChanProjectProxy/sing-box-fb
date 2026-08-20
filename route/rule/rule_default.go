@@ -12,7 +12,7 @@ import (
 	"github.com/sagernet/sing/service"
 )
 
-func NewRule(ctx context.Context, logger log.ContextLogger, options option.Rule, checkOutbound bool) (adapter.Rule, error) {
+func NewRule(ctx context.Context, logger log.StructuredLogger, options option.Rule, checkOutbound bool) (adapter.Rule, error) {
 	switch options.Type {
 	case "", C.RuleTypeDefault:
 		if !options.DefaultOptions.IsValid() {
@@ -47,16 +47,12 @@ type DefaultRule struct {
 	abstractDefaultRule
 }
 
-func (r *DefaultRule) matchStates(metadata *adapter.InboundContext) ruleMatchStateSet {
-	return r.abstractDefaultRule.matchStates(metadata)
-}
-
 type RuleItem interface {
 	Match(metadata *adapter.InboundContext) bool
 	String() string
 }
 
-func NewDefaultRule(ctx context.Context, logger log.ContextLogger, options option.DefaultRule) (*DefaultRule, error) {
+func NewDefaultRule(ctx context.Context, logger log.StructuredLogger, options option.DefaultRule) (*DefaultRule, error) {
 	action, err := NewRuleAction(ctx, logger, options.RuleAction)
 	if err != nil {
 		return nil, E.Cause(err, "action")
@@ -307,10 +303,6 @@ var _ adapter.Rule = (*LogicalRule)(nil)
 
 type LogicalRule struct {
 	abstractLogicalRule
-}
-
-func (r *LogicalRule) matchStates(metadata *adapter.InboundContext) ruleMatchStateSet {
-	return r.abstractLogicalRule.matchStates(metadata)
 }
 
 func NewLogicalRule(ctx context.Context, logger log.ContextLogger, options option.LogicalRule) (*LogicalRule, error) {

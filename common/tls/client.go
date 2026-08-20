@@ -8,12 +8,13 @@ import (
 	"os"
 	"strings"
 
+	"github.com/sagernet/sing-box/log"
+
 	"github.com/sagernet/sing-box/common/badtls"
 	"github.com/sagernet/sing-box/common/tlsspoof"
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/option"
 	E "github.com/sagernet/sing/common/exceptions"
-	"github.com/sagernet/sing/common/logger"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
 	aTLS "github.com/sagernet/sing/common/tls"
@@ -45,7 +46,7 @@ func applyTLSSpoof(conn net.Conn, spoof string, method tlsspoof.Method) (net.Con
 	return tlsspoof.NewConn(conn, method, spoof)
 }
 
-func NewDialerFromOptions(ctx context.Context, logger logger.ContextLogger, dialer N.Dialer, serverAddress string, options option.OutboundTLSOptions) (N.Dialer, error) {
+func NewDialerFromOptions(ctx context.Context, logger log.StructuredLogger, dialer N.Dialer, serverAddress string, options option.OutboundTLSOptions) (N.Dialer, error) {
 	if !options.Enabled {
 		return dialer, nil
 	}
@@ -61,7 +62,7 @@ func NewDialerFromOptions(ctx context.Context, logger logger.ContextLogger, dial
 	return NewDialer(dialer, config), nil
 }
 
-func NewClient(ctx context.Context, logger logger.ContextLogger, serverAddress string, options option.OutboundTLSOptions) (Config, error) {
+func NewClient(ctx context.Context, logger log.StructuredLogger, serverAddress string, options option.OutboundTLSOptions) (Config, error) {
 	return NewClientWithOptions(ClientOptions{
 		Context:       ctx,
 		Logger:        logger,
@@ -72,7 +73,7 @@ func NewClient(ctx context.Context, logger logger.ContextLogger, serverAddress s
 
 type ClientOptions struct {
 	Context              context.Context
-	Logger               logger.ContextLogger
+	Logger               log.StructuredLogger
 	ServerAddress        string
 	Options              option.OutboundTLSOptions
 	AllowEmptyServerName bool
@@ -85,11 +86,11 @@ func NewClientWithOptions(options ClientOptions) (Config, error) {
 	}
 	if !options.KTLSCompatible {
 		if options.Options.KernelTx {
-			options.Logger.Warn("enabling kTLS TX in current scenarios will definitely reduce performance, please checkout https://sing-box.sagernet.org/configuration/shared/tls/#kernel_tx")
+			options.Logger.WarnEvent("ktls.unavailable", "kTLS TX reduces performance", log.String("reason", "kernel_tx"))
 		}
 	}
 	if options.Options.KernelRx {
-		options.Logger.Warn("enabling kTLS RX will definitely reduce performance, please checkout https://sing-box.sagernet.org/configuration/shared/tls/#kernel_rx")
+		options.Logger.WarnEvent("ktls.unavailable", "kTLS RX reduces performance", log.String("reason", "kernel_rx"))
 	}
 	switch options.Options.Engine {
 	case "", C.TLSEngineGo:

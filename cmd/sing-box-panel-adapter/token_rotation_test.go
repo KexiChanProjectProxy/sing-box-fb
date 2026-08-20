@@ -13,7 +13,7 @@ import (
 
 	"github.com/sagernet/sing-box/internal/paneladapter/client"
 	"github.com/sagernet/sing-box/internal/paneladapter/config"
-	"github.com/sagernet/sing/common/logger"
+	"github.com/sagernet/sing-box/log"
 )
 
 func TestRunTokenRotation_retriesPendingTokenWithoutRequestingAnother(t *testing.T) {
@@ -47,7 +47,7 @@ func TestRunTokenRotation_retriesPendingTokenWithoutRequestingAnother(t *testing
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		runTokenRotationWithRetry(ctx, panelClient, configPath, 10*time.Millisecond, 200*time.Millisecond, logger.NOP())
+		runTokenRotationWithRetry(ctx, panelClient, configPath, 10*time.Millisecond, 200*time.Millisecond, log.NewNOPFactory().Logger())
 	}()
 
 	select {

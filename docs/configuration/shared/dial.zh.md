@@ -4,7 +4,9 @@ icon: material/new-box
 
 !!! quote "sing-box 1.14.0 中的更改"
 
-    :material-alert: [domain_resolver](#domain_resolver)
+	:material-plus: [prefer_domain](#prefer_domain)  
+	:material-alert: [domain_resolver](#domain_resolver)  
+	:material-alert: [netns](#netns)
 
 !!! quote "sing-box 1.13.0 中的更改"
 
@@ -45,6 +47,7 @@ icon: material/new-box
   "tcp_keep_alive": "",
   "tcp_keep_alive_interval": "",
   "udp_fragment": false,
+  "prefer_domain": false,
 
   "domain_resolver": "", // 或 {}
   "network_strategy": "",
@@ -118,6 +121,9 @@ icon: material/new-box
 
 设置网络命名空间，名称或路径。
 
+自 sing-box 1.14.0 起，也可以使用[网络命名空间](/zh/configuration/network-namespace/)的标签。
+应避免引用 `unshare` 类型的网络命名空间，因为其唯一出口是由 sing-box 自身管理的 tun 接口。
+
 #### connect_timeout
 
 连接超时，采用 golang 的 Duration 格式。
@@ -164,6 +170,26 @@ TCP keep alive 间隔。
 #### udp_fragment
 
 启用 UDP 分段。
+
+#### prefer_domain
+
+!!! info ""
+
+    仅在流量已被嗅探时有效。
+
+优先使用嗅探到的域名作为连接目标。
+
+启用后，如果流量已被嗅探（HTTP、TLS 或 QUIC 协议），
+出站将连接到嗅探到的域名而不是原始目标。
+原始端口始终保留。
+
+需要通过路由规则操作已经进行了嗅探。
+此选项不会自动启用嗅探。
+
+仅适用于已嗅探的 HTTP、TLS 和 QUIC 流量。
+其他协议（DNS、STUN、BitTorrent、DTLS、SSH、RDP、NTP）不受影响。
+
+当在组出站（如 `selector` 或 `urltest`）中使用时，组的 `prefer_domain` 设置会在连接被委托给子出站之前应用。如果组级别设置已启用，域名重写发生在组级别，不受所选子出站自身设置的影响。当子出站被直接使用时，其自己的 `prefer_domain` 设置按常规应用。
 
 #### domain_resolver
 

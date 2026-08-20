@@ -65,7 +65,7 @@ func (l *Listener) ListenTCP() (net.Listener, error) {
 			})
 		})
 	}
-	tcpListener, err := ListenNetworkNamespace[net.Listener](l.listenOptions.NetNs, func() (net.Listener, error) {
+	tcpListener, err := ListenNetworkNamespace[net.Listener](l.ctx, l.listenOptions.NetNs, func() (net.Listener, error) {
 		if l.listenOptions.TCPFastOpen {
 			var tfoConfig tfo.ListenConfig
 			tfoConfig.ListenConfig = listenConfig
@@ -77,7 +77,8 @@ func (l *Listener) ListenTCP() (net.Listener, error) {
 	if err != nil {
 		return nil, err
 	}
-	l.logger.Info("tcp server started at ", tcpListener.Addr())
+	l.logger.InfoEvent("listener.started", "server started", log.String("listen", tcpListener.Addr().String()), log.String("network", "tcp"))
+
 	l.tcpListener = tcpListener
 	return tcpListener, err
 }
@@ -90,14 +91,16 @@ func (l *Listener) loopTCPIn() {
 		if err != nil {
 			//nolint:staticcheck
 			if netError, isNetError := err.(net.Error); isNetError && netError.Temporary() {
-				l.logger.Error(err)
+				l.logger.ErrorEvent("listener.error", "listener error", log.Err(err))
+
 				continue
 			}
 			if l.shutdown.Load() && E.IsClosed(err) {
 				return
 			}
 			l.tcpListener.Close()
-			l.logger.Error("tcp listener closed: ", err)
+			l.logger.ErrorEvent("listener.closed", "listener closed", log.Err(err))
+
 			continue
 		}
 		//nolint:staticcheck
@@ -105,7 +108,8 @@ func (l *Listener) loopTCPIn() {
 		metadata.Source = M.SocksaddrFromNet(conn.RemoteAddr()).Unwrap()
 		metadata.OriginDestination = M.SocksaddrFromNet(conn.LocalAddr()).Unwrap()
 		ctx := log.ContextWithNewID(l.ctx)
-		l.logger.InfoContext(ctx, "inbound connection from ", metadata.Source)
+		l.logger.InfoEventContext(ctx, "inbound.accepted", "inbound accepted", log.Addr("source", metadata.Source))
+
 		go l.connHandler.NewConnection(ctx, conn, metadata, nil)
 	}
 }

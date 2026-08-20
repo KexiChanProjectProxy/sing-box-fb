@@ -27,6 +27,7 @@ import (
 
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/internal/paneladapter/contract"
+	"github.com/sagernet/sing-tun"
 	"github.com/sagernet/sing/common/bufio"
 	N "github.com/sagernet/sing/common/network"
 )
@@ -303,6 +304,39 @@ func (t *Tracker) RoutedPacketConnection(_ context.Context, conn N.PacketConn, m
 	return t.TrackPacketConnection(conn, metadata.Inbound, userID)
 }
 
+// RoutedFlow implements sing-box's L3 flow traffic hook.
+func (t *Tracker) RoutedFlow(_ context.Context, metadata adapter.InboundContext, _ adapter.Rule, _ adapter.Outbound) tun.FlowTracker {
+	userID := metadata.UserID
+	if userID == "" {
+		userID = metadata.User
+	}
+	if metadata.Source.IsValid() {
+		t.TrackDistinctIP(metadata.Source.String(), metadata.Inbound, userID)
+	}
+	return t.trackFlow(metadata.Inbound, userID)
+}
+
+func (t *Tracker) trackFlow(inboundTag, userID string) tun.FlowTracker {
+	if userID == "" {
+		return nil
+	}
+	k := key{InboundTag: inboundTag, UserID: userID}
+	t.mu.Lock()
+	if _, ok := t.inboundIDLocked(inboundTag); !ok {
+		t.mu.Unlock()
+		return nil
+	}
+	c := t.getOrCreateCounters(k)
+	c.Active.Add(1)
+	t.mu.Unlock()
+	t.activeConns.Add(1)
+	return &trackedFlow{
+		tracker:    t,
+		counterKey: k,
+		counters:   c,
+	}
+}
+
 // ConfirmJournaled confirms that the staged data was durably persisted
 // (e.g., written to the T3 state store). After this call,
 // ResetLiveCountersWhenJournaled will subtract the staged snapshot from
@@ -503,4 +537,32 @@ func (c *trackedPacketConn) Close() error {
 
 func (c *trackedPacketConn) Upstream() any {
 	return c.PacketConn
+}
+
+var _ tun.FlowTracker = (*trackedFlow)(nil)
+
+type trackedFlow struct {
+	tracker    *Tracker
+	counterKey key
+	counters   *counters
+	closeOnce  sync.Once
+}
+
+func (f *trackedFlow) AttachFlow(handle tun.FlowHandle) {}
+
+func (f *trackedFlow) CountForward(n int) {
+	f.counters.Upload.Add(int64(n))
+}
+
+func (f *trackedFlow) CountReverse(n int) {
+	f.counters.Download.Add(int64(n))
+}
+
+func (f *trackedFlow) FlowEstablished() {}
+
+func (f *trackedFlow) CloseFlow(reason tun.FlowCloseReason) {
+	f.closeOnce.Do(func() {
+		f.tracker.activeConns.Add(-1)
+		f.tracker.releaseCounters(f.counterKey, f.counters)
+	})
 }

@@ -5,6 +5,7 @@ import (
 	"context"
 	"net"
 
+
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/adapter/inbound"
 	"github.com/sagernet/sing-box/common/listener"
@@ -29,13 +30,13 @@ var _ adapter.TCPInjectableInbound = (*Inbound)(nil)
 type Inbound struct {
 	inbound.Adapter
 	router        adapter.ConnectionRouterEx
-	logger        log.ContextLogger
+	logger        log.StructuredLogger
 	listener      *listener.Listener
 	authenticator *auth.Authenticator
 	tlsConfig     tls.ServerConfig
 }
 
-func NewInbound(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.HTTPMixedInboundOptions) (adapter.Inbound, error) {
+func NewInbound(ctx context.Context, router adapter.Router, logger log.StructuredLogger, tag string, options option.HTTPMixedInboundOptions) (adapter.Inbound, error) {
 	inbound := &Inbound{
 		Adapter:       inbound.NewAdapter(C.TypeHTTP, tag),
 		router:        uot.NewRouter(router, logger),
@@ -91,7 +92,8 @@ func (h *Inbound) NewConnection(ctx context.Context, conn net.Conn, metadata ada
 		tlsConn, err := tls.ServerHandshake(ctx, conn, h.tlsConfig)
 		if err != nil {
 			N.CloseOnHandshakeFailure(conn, onClose, err)
-			h.logger.ErrorContext(ctx, E.Cause(err, "process connection from ", metadata.Source, ": TLS handshake"))
+			adapter.LogConnectionError(h.logger, ctx, err, metadata.Source)
+
 			return
 		}
 		conn = tlsConn
@@ -99,34 +101,27 @@ func (h *Inbound) NewConnection(ctx context.Context, conn net.Conn, metadata ada
 	err := http.HandleConnectionEx(ctx, conn, std_bufio.NewReader(conn), h.authenticator, adapter.NewUpstreamHandler(metadata, h.newUserConnection, h.streamUserPacketConnection), metadata.Source, onClose)
 	if err != nil {
 		N.CloseOnHandshakeFailure(conn, onClose, err)
-		h.logger.ErrorContext(ctx, E.Cause(err, "process connection from ", metadata.Source))
+		adapter.LogConnectionError(h.logger, ctx, err, metadata.Source)
+
 	}
 }
 
 func (h *Inbound) newUserConnection(ctx context.Context, conn net.Conn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) {
 	metadata.Inbound = h.Tag()
 	metadata.InboundType = h.Type()
-	user, loaded := auth.UserFromContext[string](ctx)
-	if !loaded {
-		h.logger.InfoContext(ctx, "inbound connection to ", metadata.Destination)
-		h.router.RouteConnectionEx(ctx, conn, metadata, onClose)
-		return
+	if user, loaded := auth.UserFromContext[string](ctx); loaded {
+		metadata.User = user
 	}
-	metadata.User = user
-	h.logger.InfoContext(ctx, "[", user, "] inbound connection to ", metadata.Destination)
+	adapter.LogInboundConnection(h.logger, ctx, metadata)
 	h.router.RouteConnectionEx(ctx, conn, metadata, onClose)
 }
 
 func (h *Inbound) streamUserPacketConnection(ctx context.Context, conn N.PacketConn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) {
 	metadata.Inbound = h.Tag()
 	metadata.InboundType = h.Type()
-	user, loaded := auth.UserFromContext[string](ctx)
-	if !loaded {
-		h.logger.InfoContext(ctx, "inbound packet connection to ", metadata.Destination)
-		h.router.RoutePacketConnectionEx(ctx, conn, metadata, onClose)
-		return
+	if user, loaded := auth.UserFromContext[string](ctx); loaded {
+		metadata.User = user
 	}
-	metadata.User = user
-	h.logger.InfoContext(ctx, "[", user, "] inbound packet connection to ", metadata.Destination)
+	adapter.LogInboundPacket(h.logger, ctx, metadata)
 	h.router.RoutePacketConnectionEx(ctx, conn, metadata, onClose)
 }

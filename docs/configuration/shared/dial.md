@@ -4,7 +4,9 @@ icon: material/new-box
 
 !!! quote "Changes in sing-box 1.14.0"
 
-    :material-alert: [domain_resolver](#domain_resolver)
+	:material-plus: [prefer_domain](#prefer_domain)  
+	:material-alert: [domain_resolver](#domain_resolver)  
+	:material-alert: [netns](#netns)
 
 !!! quote "Changes in sing-box 1.13.0"
 
@@ -45,6 +47,7 @@ icon: material/new-box
   "tcp_keep_alive": "",
   "tcp_keep_alive_interval": "",
   "udp_fragment": false,
+  "prefer_domain": false,
 
   "domain_resolver": "", // or {}
   "network_strategy": "",
@@ -118,6 +121,9 @@ Reuse listener address.
 
 Set network namespace, name or path.
 
+Since sing-box 1.14.0, the tag of a [network namespace](/configuration/network-namespace/) can also be used.
+Referencing an `unshare` network namespace should be avoided, since its only route out is the tun interface managed by sing-box itself.
+
 #### connect_timeout
 
 Connect timeout, in golang's Duration format.
@@ -166,6 +172,26 @@ TCP keep alive interval.
 #### udp_fragment
 
 Enable UDP fragmentation.
+
+#### prefer_domain
+
+!!! info ""
+
+    Only effective when the traffic has been sniffed.
+
+Prefer using the sniffed domain as the connection destination.
+
+When enabled and the traffic has been sniffed (HTTP, TLS, or QUIC protocol),
+the outbound will connect to the sniffed domain instead of the original destination.
+The original port is always preserved.
+
+Requires sniffing to have already occurred via route rule actions.
+This option does not enable sniffing automatically.
+
+Only applies to already-sniffed HTTP, TLS, and QUIC traffic.
+Other protocols (DNS, STUN, BitTorrent, DTLS, SSH, RDP, NTP) are not affected.
+
+When used in a group outbound (such as `selector` or `urltest`), the group's `prefer_domain` setting is applied before the connection is delegated to a child outbound. If the group-level setting is enabled, the domain rewrite happens at the group level, regardless of the selected child outbound's own setting. When a child outbound is used directly, its own `prefer_domain` setting applies as usual.
 
 #### domain_resolver
 

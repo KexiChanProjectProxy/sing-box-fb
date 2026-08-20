@@ -4,8 +4,9 @@ import (
 	"net/netip"
 	"sync"
 
+	"github.com/sagernet/sing-box/log"
+
 	"github.com/sagernet/sing-box/adapter"
-	"github.com/sagernet/sing/common/logger"
 )
 
 var _ adapter.FakeIPStorage = (*MemoryStorage)(nil)
@@ -58,7 +59,7 @@ func (s *MemoryStorage) FakeIPStore(address netip.Addr, domain string) error {
 	return nil
 }
 
-func (s *MemoryStorage) FakeIPStoreAsync(address netip.Addr, domain string, logger logger.Logger) {
+func (s *MemoryStorage) FakeIPStoreAsync(address netip.Addr, domain string, logger log.StructuredLogger) {
 	_ = s.FakeIPStore(address, domain)
 }
 

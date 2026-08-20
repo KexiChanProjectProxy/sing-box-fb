@@ -24,7 +24,6 @@ import (
 	"github.com/sagernet/sing/common"
 	"github.com/sagernet/sing/common/bufio"
 	E "github.com/sagernet/sing/common/exceptions"
-	"github.com/sagernet/sing/common/logger"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
 	"github.com/sagernet/sing/service"
@@ -41,11 +40,11 @@ var (
 
 type Outbound struct {
 	outbound.Adapter
-	logger logger.ContextLogger
+	logger log.StructuredLogger
 	client *hysteria2.Client
 }
 
-func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.Hysteria2OutboundOptions) (adapter.Outbound, error) {
+func NewOutbound(ctx context.Context, router adapter.Router, logger log.StructuredLogger, tag string, options option.Hysteria2OutboundOptions) (adapter.Outbound, error) {
 	options.UDPFragmentDefault = true
 	if options.TLS == nil || !options.TLS.Enabled {
 		return nil, C.ErrTLSRequired
@@ -111,7 +110,14 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 				}
 				return dnsRouter.Lookup(ctx, host, dnsOptions)
 			},
-			Logger: logger,
+			Logger:    logger,
+			IPVersion: options.Realm.IPVersion,
+		}
+		if options.Realm.PortMapping != nil && options.Realm.PortMapping.Enabled {
+			realmOptions.PortMapping = &realm.PortMappingOptions{
+				Timeout:  time.Duration(options.Realm.PortMapping.Timeout),
+				Lifetime: time.Duration(options.Realm.PortMapping.Lifetime),
+			}
 		}
 	}
 	networkList := options.Network.Build()
@@ -143,6 +149,7 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 		},
 		UDPDisabled:  !common.Contains(networkList, N.NetworkUDP),
 		BBRProfile:   options.BBRProfile,
+		ChromeParrot: !options.DisableChromeParrot,
 		RealmOptions: realmOptions,
 	})
 	if err != nil {
@@ -177,7 +184,8 @@ func outboundTLSOptions(options option.Hysteria2OutboundOptions) (string, option
 func (h *Outbound) DialContext(ctx context.Context, network string, destination M.Socksaddr) (net.Conn, error) {
 	switch N.NetworkName(network) {
 	case N.NetworkTCP:
-		h.logger.InfoContext(ctx, "outbound connection to ", destination)
+		adapter.LogOutboundConnection(h.logger, ctx, destination)
+
 		return h.client.DialConn(ctx, destination)
 	case N.NetworkUDP:
 		conn, err := h.ListenPacket(ctx, destination)
@@ -191,7 +199,8 @@ func (h *Outbound) DialContext(ctx context.Context, network string, destination 
 }
 
 func (h *Outbound) ListenPacket(ctx context.Context, destination M.Socksaddr) (net.PacketConn, error) {
-	h.logger.InfoContext(ctx, "outbound packet connection to ", destination)
+	adapter.LogOutboundPacket(h.logger, ctx, destination)
+
 	return h.client.ListenPacket(ctx)
 }
 

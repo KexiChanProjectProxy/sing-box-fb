@@ -10,6 +10,7 @@ import (
 
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/common/redir"
+	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing/common/buf"
 	sBufio "github.com/sagernet/sing/common/bufio"
 	"github.com/sagernet/sing/common/control"
@@ -22,8 +23,11 @@ import (
 const udpOutputBatchSize = 128
 
 func (l *Listener) ListenUDP() (net.PacketConn, error) {
+	return l.ListenUDPWithConfig(net.ListenConfig{})
+}
+
+func (l *Listener) ListenUDPWithConfig(listenConfig net.ListenConfig) (net.PacketConn, error) {
 	bindAddr := M.SocksaddrFrom(l.listenOptions.Listen.Build(netip.AddrFrom4([4]byte{127, 0, 0, 1})), l.listenOptions.ListenPort)
-	var listenConfig net.ListenConfig
 	if l.listenOptions.BindInterface != "" {
 		listenConfig.Control = control.Append(listenConfig.Control, control.BindToInterface(service.FromContext[adapter.NetworkManager](l.ctx).InterfaceFinder(), l.listenOptions.BindInterface, -1))
 	}
@@ -49,7 +53,7 @@ func (l *Listener) ListenUDP() (net.PacketConn, error) {
 			})
 		})
 	}
-	udpConn, err := ListenNetworkNamespace[net.PacketConn](l.listenOptions.NetNs, func() (net.PacketConn, error) {
+	udpConn, err := ListenNetworkNamespace[net.PacketConn](l.ctx, l.listenOptions.NetNs, func() (net.PacketConn, error) {
 		return listenConfig.ListenPacket(l.ctx, M.NetworkFromNetAddr(N.NetworkUDP, bindAddr.Addr), bindAddr.String())
 	})
 	if err != nil {
@@ -57,12 +61,13 @@ func (l *Listener) ListenUDP() (net.PacketConn, error) {
 	}
 	l.udpConn = udpConn.(*net.UDPConn)
 	l.udpAddr = bindAddr
-	l.logger.Info("udp server started at ", udpConn.LocalAddr())
+	l.logger.InfoEvent("listener.started", "server started", log.String("listen", udpConn.LocalAddr().String()), log.String("network", "udp"))
+
 	return udpConn, err
 }
 
 func (l *Listener) DialContext(dialer net.Dialer, ctx context.Context, network string, address string) (net.Conn, error) {
-	return ListenNetworkNamespace[net.Conn](l.listenOptions.NetNs, func() (net.Conn, error) {
+	return ListenNetworkNamespace[net.Conn](l.ctx, l.listenOptions.NetNs, func() (net.Conn, error) {
 		if l.listenOptions.BindInterface != "" {
 			dialer.Control = control.Append(dialer.Control, control.BindToInterface(service.FromContext[adapter.NetworkManager](l.ctx).InterfaceFinder(), l.listenOptions.BindInterface, -1))
 		}
@@ -77,7 +82,7 @@ func (l *Listener) DialContext(dialer net.Dialer, ctx context.Context, network s
 }
 
 func (l *Listener) ListenPacket(listenConfig net.ListenConfig, ctx context.Context, network string, address string) (net.PacketConn, error) {
-	return ListenNetworkNamespace[net.PacketConn](l.listenOptions.NetNs, func() (net.PacketConn, error) {
+	return ListenNetworkNamespace[net.PacketConn](l.ctx, l.listenOptions.NetNs, func() (net.PacketConn, error) {
 		if l.listenOptions.BindInterface != "" {
 			listenConfig.Control = control.Append(listenConfig.Control, control.BindToInterface(service.FromContext[adapter.NetworkManager](l.ctx).InterfaceFinder(), l.listenOptions.BindInterface, -1))
 		}
@@ -134,7 +139,8 @@ func (l *Listener) loopUDPIn() {
 					return
 				}
 				l.udpConn.Close()
-				l.logger.Error("udp listener closed: ", err)
+				l.logger.ErrorEvent("listener.closed", "listener closed", log.Err(err))
+
 				return
 			}
 			buffer.Truncate(n)
@@ -156,7 +162,8 @@ func (l *Listener) loopUDPIn() {
 					return
 				}
 				l.udpConn.Close()
-				l.logger.Error("udp listener closed: ", err)
+				l.logger.ErrorEvent("listener.closed", "listener closed", log.Err(err))
+
 				return
 			}
 			buffer.Truncate(n)
@@ -178,7 +185,8 @@ func (l *Listener) loopUDPInBatch(handler adapter.PacketBatchHandler, readWaiter
 				return
 			}
 			l.udpConn.Close()
-			l.logger.Error("udp listener closed: ", err)
+			l.logger.ErrorEvent("listener.closed", "listener closed", log.Err(err))
+
 			return
 		}
 		handler.NewPacketBatch(buffers, sources)
@@ -223,7 +231,8 @@ func (l *Listener) loopUDPOut() {
 			if l.shutdown.Load() && E.IsClosed(err) {
 				return
 			}
-			l.logger.Error("udp listener write back: ", err)
+			l.logger.ErrorEvent("listener.error", "listener error", log.Err(err))
+
 		}
 	}
 }
@@ -255,7 +264,8 @@ func (w *packetWriter) WritePacket(buffer *buf.Buffer, destination M.Socksaddr) 
 		if w.shutdown.Load() {
 			return os.ErrClosed
 		}
-		w.logger.Trace("dropped packet to ", destination)
+		w.logger.TraceEvent("listener.error", "listener error", log.Addr("destination", destination), log.String("reason", "dropped"))
+
 		return nil
 	}
 }
@@ -278,7 +288,8 @@ func (w *packetWriter) WritePacketBatch(buffers []*buf.Buffer, destinations []M.
 			if w.shutdown.Load() {
 				return os.ErrClosed
 			}
-			w.logger.Trace("dropped packet batch to ", destinations[index])
+			w.logger.TraceEvent("listener.error", "listener error", log.Addr("destination", destinations[index]), log.String("reason", "dropped"))
+
 			return nil
 		}
 	}

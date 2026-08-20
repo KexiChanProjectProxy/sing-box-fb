@@ -29,7 +29,7 @@ var commandRun = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		err := run()
 		if err != nil {
-			log.Fatal(err)
+			log.FatalEvent("cli.error", err.Error(), log.Err(err))
 		}
 	},
 }
@@ -104,10 +104,17 @@ func readConfigAndMerge() (option.Options, error) {
 	if err != nil {
 		return option.Options{}, err
 	}
+	return mergeOptionsList(optionsList)
+}
+
+func mergeOptionsList(optionsList []*OptionsEntry) (option.Options, error) {
 	if len(optionsList) == 1 {
 		return optionsList[0].options, nil
 	}
-	var mergedMessage json.RawMessage
+	var (
+		mergedMessage json.RawMessage
+		err           error
+	)
 	for _, options := range optionsList {
 		mergedMessage, err = badjson.MergeJSON(globalCtx, options.options.RawMessage, mergedMessage, false)
 		if err != nil {
@@ -122,11 +129,7 @@ func readConfigAndMerge() (option.Options, error) {
 	return mergedOptions, nil
 }
 
-func create() (*box.Box, context.CancelFunc, error) {
-	options, err := readConfigAndMerge()
-	if err != nil {
-		return nil, nil, err
-	}
+func create(options option.Options) (*box.Box, context.CancelFunc, error) {
 	if disableColor {
 		if options.Log == nil {
 			options.Log = &option.LogOptions{}
@@ -135,8 +138,9 @@ func create() (*box.Box, context.CancelFunc, error) {
 	}
 	ctx, cancel := context.WithCancel(globalCtx)
 	instance, err := box.New(box.Options{
-		Context: ctx,
-		Options: options,
+		Context:                    ctx,
+		Options:                    options,
+		NetworkNamespaceHolderArgs: []string{"/proc/self/exe", commandNetnsHolder.Use},
 	})
 	if err != nil {
 		cancel()
@@ -167,13 +171,25 @@ func create() (*box.Box, context.CancelFunc, error) {
 }
 
 func run() error {
+	optionsList, err := readConfig()
+	if err != nil {
+		return err
+	}
+	options, err := mergeOptionsList(optionsList)
+	if err != nil {
+		return err
+	}
+	err = runInUserNamespaceIfNeeded(options, optionsList)
+	if err != nil {
+		return err
+	}
 	osSignals := make(chan os.Signal, 1)
 	signal.Notify(osSignals, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	defer signal.Stop(osSignals)
 	for {
-		instance, cancel, err := create()
-		if err != nil {
-			return err
+		instance, cancel, createErr := create(options)
+		if createErr != nil {
+			return createErr
 		}
 		runtimeDebug.FreeOSMemory()
 		for {
@@ -181,7 +197,7 @@ func run() error {
 			if osSignal == syscall.SIGHUP {
 				err = check()
 				if err != nil {
-					log.Error(E.Cause(err, "reload service"))
+					log.ErrorEvent("cli.error", "reload service", log.Err(err))
 					continue
 				}
 			}
@@ -192,11 +208,15 @@ func run() error {
 			closed()
 			if osSignal != syscall.SIGHUP {
 				if err != nil {
-					log.Error(E.Cause(err, "sing-box did not closed properly"))
+					log.ErrorEvent("cli.error", "sing-box did not closed properly", log.Err(err))
 				}
 				return nil
 			}
 			break
+		}
+		options, err = readConfigAndMerge()
+		if err != nil {
+			return err
 		}
 	}
 }
@@ -208,5 +228,5 @@ func closeMonitor(ctx context.Context) {
 		return
 	default:
 	}
-	log.Fatal("sing-box did not close!")
+	log.FatalEvent("cli.error", "sing-box did not close!")
 }

@@ -14,12 +14,12 @@ import (
 
 type ServerOptions struct {
 	Context        context.Context
-	Logger         log.ContextLogger
+	Logger         log.StructuredLogger
 	Options        option.InboundTLSOptions
 	KTLSCompatible bool
 }
 
-func NewServer(ctx context.Context, logger log.ContextLogger, options option.InboundTLSOptions) (ServerConfig, error) {
+func NewServer(ctx context.Context, logger log.StructuredLogger, options option.InboundTLSOptions) (ServerConfig, error) {
 	return NewServerWithOptions(ServerOptions{
 		Context: ctx,
 		Logger:  logger,
@@ -33,11 +33,11 @@ func NewServerWithOptions(options ServerOptions) (ServerConfig, error) {
 	}
 	if !options.KTLSCompatible {
 		if options.Options.KernelTx {
-			options.Logger.Warn("enabling kTLS TX in current scenarios will definitely reduce performance, please checkout https://sing-box.sagernet.org/configuration/shared/tls/#kernel_tx")
+			options.Logger.WarnEvent("ktls.unavailable", "kTLS TX reduces performance", log.String("reason", "kernel_tx"))
 		}
 	}
 	if options.Options.KernelRx {
-		options.Logger.Warn("enabling kTLS RX will definitely reduce performance, please checkout https://sing-box.sagernet.org/configuration/shared/tls/#kernel_rx")
+		options.Logger.WarnEvent("ktls.unavailable", "kTLS RX reduces performance", log.String("reason", "kernel_rx"))
 	}
 	if options.Options.Reality != nil && options.Options.Reality.Enabled {
 		return NewRealityServer(options.Context, options.Logger, options.Options)

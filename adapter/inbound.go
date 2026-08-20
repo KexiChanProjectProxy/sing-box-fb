@@ -33,7 +33,7 @@ type UDPInjectableInbound interface {
 
 type InboundRegistry interface {
 	option.InboundOptionsRegistry
-	Create(ctx context.Context, router Router, logger log.ContextLogger, tag string, inboundType string, options any) (Inbound, error)
+	Create(ctx context.Context, router Router, logger log.StructuredLogger, tag string, inboundType string, options any) (Inbound, error)
 }
 
 type InboundManager interface {
@@ -41,7 +41,7 @@ type InboundManager interface {
 	Inbounds() []Inbound
 	Get(tag string) (Inbound, bool)
 	Remove(tag string) error
-	Create(ctx context.Context, router Router, logger log.ContextLogger, tag string, inboundType string, options any) error
+	Create(ctx context.Context, router Router, logger log.StructuredLogger, tag string, inboundType string, options any) error
 }
 
 type InboundContext struct {
@@ -87,6 +87,7 @@ type InboundContext struct {
 
 	DestinationAddresses                []netip.Addr
 	DNSResponse                         *dns.Msg
+	NamedDNSResponses                   map[string]*dns.Msg
 	DestinationAddressMatchFromResponse bool
 	SourceGeoIPCode                     string
 	GeoIPCode                           string
@@ -95,6 +96,7 @@ type InboundContext struct {
 	SourceHostname                      string
 	QueryType                           uint16
 	FakeIP                              bool
+	PreMatch                            bool
 
 	// rule cache
 
@@ -106,6 +108,7 @@ type InboundContext struct {
 	DestinationAddressMatch      bool
 	DestinationPortMatch         bool
 	DidMatch                     bool
+	MatchedRuleSetTag            string
 	IgnoreDestinationIPCIDRMatch bool
 }
 
@@ -121,6 +124,7 @@ func (c *InboundContext) ResetRuleMatchCache() {
 	c.DestinationAddressMatch = false
 	c.DestinationPortMatch = false
 	c.DidMatch = false
+	c.MatchedRuleSetTag = ""
 }
 
 func (c *InboundContext) DNSResponseAddressesForMatch() []netip.Addr {

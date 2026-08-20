@@ -48,6 +48,12 @@ icon: material/alert-decagram
     "realm_id": "",
     "stun_servers": [],
     "stun_domain_resolver": "", // 或 {}
+    "ip_version": 0,
+    "port_mapping": {
+      "enabled": false,
+      "timeout": "",
+      "lifetime": ""
+    },
     "http_client": {}
   }
 }
@@ -145,7 +151,7 @@ HTTP3 服务器认证失败时的行为 （对象配置）。
 | Type     | 描述      | 字段                                  |
 |----------|---------|-------------------------------------|
 | `file`   | 作为文件服务器 | `directory`                         |
-| `proxy`  | 作为反向代理  | `url`, `rewrite_host`               |
+| `proxy`  | 作为反向代理  | `url`, `rewrite_host`, `x_forwarded` |
 | `string` | 返回固定响应  | `status_code`, `headers`, `content` |
 
 如果 masquerade 未配置，则返回 404 页。
@@ -163,6 +169,28 @@ HTTP3 服务器认证失败时的行为 （对象配置）。
 #### masquerade.rewrite_host
 
 重写请求头中的 Host 字段到目标 URL。
+
+#### masquerade.x_forwarded
+
+向上游代理请求添加 `X-Forwarded-For`、`X-Forwarded-Host` 和 `X-Forwarded-Proto` 请求头。
+
+| 请求头                  | 值                                         |
+|-----------------------|------------------------------------------|
+| `X-Forwarded-For`     | 连接的 HTTP/3 客户端 IP 地址                 |
+| `X-Forwarded-Host`    | 客户端最初请求的主机名                       |
+| `X-Forwarded-Proto`   | 原始协议（`https`）                         |
+
+仅在对象代理形式（`masquerade.type` = `proxy`）中可用；字符串 URL 形式（`masquerade`）不支持。
+
+默认值为 `false`。
+
+!!! warning "隐私"
+
+    此选项会将客户端连接元数据（客户端 IP）透露给上游服务器。仅在上游受信任时启用。
+
+启用 `x_forwarded` 时，上游将收到上述值。禁用时，客户端提供的转发请求头会被剥离。
+
+`X-Forwarded-Host` 始终携带客户端最初请求的原始主机名，无论 `rewrite_host` 是否重写了上游的 `Host` 请求头。
 
 #### masquerade.status_code
 
@@ -233,6 +261,38 @@ Realm 上的槽位标识符。
 若直接将此选项设置为字符串，则等同于设置该选项的 `server` 字段。
 
 如果为空，则使用默认域名解析器。
+
+#### realm.ip_version
+
+将 realm 连接（STUN、打洞与最终的 QUIC 路径）限制为单一 IP 版本。
+
+`4` 或 `6`。默认使用两者。
+
+`listen` 地址必须与所选版本兼容。
+
+#### realm.port_mapping
+
+通过 UPnP 或 NAT-PMP 在本地网关上维护 UDP 端口映射。
+
+映射在 STUN 发现之前建立，可在支持的网关后提升打洞成功率；失败不影响正常流程。
+
+需要 IPv4：与 `"ip_version": 6` 冲突。
+
+#### realm.port_mapping.enabled
+
+启用端口映射。
+
+#### realm.port_mapping.timeout
+
+网关发现与映射操作的超时。
+
+默认使用 `10s`。
+
+#### realm.port_mapping.lifetime
+
+映射的租约时长；每过一半时长续期一次。
+
+默认使用 `10m`。
 
 #### realm.http_client
 

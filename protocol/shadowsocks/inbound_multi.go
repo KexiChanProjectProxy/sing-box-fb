@@ -15,15 +15,13 @@ import (
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
-	"github.com/sagernet/sing-shadowsocks"
+	shadowsocks "github.com/sagernet/sing-shadowsocks"
 	"github.com/sagernet/sing-shadowsocks/shadowaead"
 	"github.com/sagernet/sing-shadowsocks/shadowaead_2022"
 	"github.com/sagernet/sing/common"
 	"github.com/sagernet/sing/common/auth"
 	"github.com/sagernet/sing/common/buf"
 	E "github.com/sagernet/sing/common/exceptions"
-	F "github.com/sagernet/sing/common/format"
-	"github.com/sagernet/sing/common/logger"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
 	"github.com/sagernet/sing/common/ntp"
@@ -39,7 +37,7 @@ type MultiInbound struct {
 	inbound.Adapter
 	ctx      context.Context
 	router   adapter.ConnectionRouterEx
-	logger   logger.ContextLogger
+	logger   log.StructuredLogger
 	listener *listener.Listener
 	service  shadowsocks.MultiService[int]
 	users    []option.ShadowsocksUser
@@ -47,7 +45,7 @@ type MultiInbound struct {
 	userLock sync.RWMutex
 }
 
-func newMultiInbound(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.ShadowsocksInboundOptions) (*MultiInbound, error) {
+func newMultiInbound(ctx context.Context, router adapter.Router, logger log.StructuredLogger, tag string, options option.ShadowsocksInboundOptions) (*MultiInbound, error) {
 	inbound := &MultiInbound{
 		Adapter: inbound.NewAdapter(C.TypeShadowsocks, tag),
 		ctx:     ctx,
@@ -176,11 +174,7 @@ func (h *MultiInbound) NewConnection(ctx context.Context, conn net.Conn, metadat
 	err := h.service.NewConnection(ctx, conn, adapter.UpstreamMetadata(metadata))
 	N.CloseOnHandshakeFailure(conn, onClose, err)
 	if err != nil {
-		if E.IsClosedOrCanceled(err) {
-			h.logger.DebugContext(ctx, "connection closed: ", err)
-		} else {
-			h.logger.ErrorContext(ctx, E.Cause(err, "process connection from ", metadata.Source))
-		}
+		adapter.LogConnectionError(h.logger, ctx, err, metadata.Source)
 	}
 }
 
@@ -188,7 +182,8 @@ func (h *MultiInbound) NewConnection(ctx context.Context, conn net.Conn, metadat
 func (h *MultiInbound) NewPacket(buffer *buf.Buffer, source M.Socksaddr) {
 	err := h.service.NewPacket(h.ctx, &stubPacketConn{h.listener.PacketWriter()}, buffer, M.Metadata{Source: source})
 	if err != nil {
-		h.logger.Error(E.Cause(err, "process packet from ", source))
+		adapter.LogConnectionError(h.logger, h.ctx, err, source)
+
 	}
 }
 
@@ -204,12 +199,11 @@ func (h *MultiInbound) newConnection(ctx context.Context, conn net.Conn, metadat
 		user = h.users[userIndex].Name
 	}
 	h.userLock.RUnlock()
-	if user == "" {
-		user = F.ToString(userIndex)
-	} else {
+	if user != "" {
 		metadata.User = user
 	}
-	h.logger.InfoContext(ctx, "[", user, "] inbound connection to ", metadata.Destination)
+	adapter.LogInboundConnection(h.logger, ctx, metadata)
+
 	metadata.Inbound = h.Tag()
 	metadata.InboundType = h.Type()
 	//nolint:staticcheck
@@ -233,14 +227,12 @@ func (h *MultiInbound) newPacketConnection(ctx context.Context, conn N.PacketCon
 		user = h.users[userIndex].Name
 	}
 	h.userLock.RUnlock()
-	if user == "" {
-		user = F.ToString(userIndex)
-	} else {
+	if user != "" {
 		metadata.User = user
 	}
 	ctx = log.ContextWithNewID(ctx)
-	h.logger.InfoContext(ctx, "[", user, "] inbound packet connection from ", metadata.Source)
-	h.logger.InfoContext(ctx, "[", user, "] inbound packet connection to ", metadata.Destination)
+	adapter.LogInboundPacket(h.logger, ctx, metadata)
+
 	metadata.Inbound = h.Tag()
 	metadata.InboundType = h.Type()
 	//nolint:staticcheck

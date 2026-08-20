@@ -3,9 +3,10 @@ package adapter
 import (
 	"net/netip"
 
+	"github.com/sagernet/sing-box/log"
+
 	"github.com/sagernet/sing-box/option"
-	"github.com/sagernet/sing-tun"
-	"github.com/sagernet/sing/common/logger"
+	tun "github.com/sagernet/sing-tun"
 )
 
 type PlatformInterface interface {
@@ -16,9 +17,10 @@ type PlatformInterface interface {
 
 	UsePlatformInterface() bool
 	OpenInterface(options *tun.Options, platformOptions option.TunPlatformOptions) (tun.Tun, error)
+	ProcessPlatformOptions(options option.TunPlatformOptions) error
 
 	UsePlatformDefaultInterfaceMonitor() bool
-	CreateDefaultInterfaceMonitor(logger logger.Logger) tun.DefaultInterfaceMonitor
+	CreateDefaultInterfaceMonitor(logger log.StructuredLogger) tun.DefaultInterfaceMonitor
 
 	UsePlatformNetworkInterfaces() bool
 	NetworkInterfaces() ([]NetworkInterface, error)
@@ -29,7 +31,6 @@ type PlatformInterface interface {
 	ClearDNSCache()
 	RequestPermissionForWIFIState() error
 	ReadWIFIState() WIFIState
-	SystemCertificates() []string
 
 	UsePlatformConnectionOwnerFinder() bool
 	FindConnectionOwner(request *FindConnectionOwnerRequest) (*ConnectionOwner, error)
@@ -52,6 +53,27 @@ type PlatformInterface interface {
 	LookupSFTPServer() (string, error)
 	ReadSystemSSHHostKey() ([]byte, error)
 	TailscaleHostname() string
+
+	UsePlatformBridge() bool
+	CreateBridge(options BridgeOptions) (BridgeSession, error)
+}
+
+type BridgeOptions struct {
+	BridgeName string
+	MTU        uint32
+	Inet4Port  netip.Addr
+	Inet6Port  netip.Addr
+	Interface  string
+	RuleIndex  int
+	RouteTable int
+}
+
+type BridgeSession interface {
+	FileDescriptor() int
+	Name() string
+	Inet6Active() bool
+	SetEgress(interfaceName string) error
+	Close() error
 }
 
 type PlatformUser struct {

@@ -8,6 +8,7 @@
     "disabled": false,
     "level": "info",
     "output": "box.log",
+    "format": "json",
     "timestamp": true
   }
 }
@@ -27,6 +28,11 @@
 #### output
 
 输出文件路径，启动后将不输出到控制台。
+
+#### format
+
+日志格式。可选，仅接受 `json`。省略时输出 JSONL（每行一个 JSON 对象）。
+无效值将被拒绝。`text` 已被移除。
 
 #### timestamp
 

@@ -47,7 +47,7 @@ type Server struct {
 	dnsRouter      adapter.DNSRouter
 	outbound       adapter.OutboundManager
 	endpoint       adapter.EndpointManager
-	logger         log.Logger
+	logger         log.StructuredLogger
 	httpServer     *http.Server
 	trafficManager *trafficcontrol.Manager
 	urlTestHistory *urltest.HistoryStorage
@@ -140,6 +140,10 @@ func NewServer(ctx context.Context, logFactory log.ObservableFactory, options op
 	})
 	if options.ExternalUI != "" {
 		s.externalUI = filemanager.BasePath(ctx, os.ExpandEnv(options.ExternalUI))
+		_, err := filemanager.ReadDir(ctx, s.externalUI)
+		if err != nil && !os.IsNotExist(err) {
+			return nil, E.Cause(err, "read external UI directory")
+		}
 		chiRouter.Group(func(r chi.Router) {
 			r.Get("/ui", http.RedirectHandler("/ui/", http.StatusMovedPermanently).ServeHTTP)
 			r.Handle("/ui/*", http.StripPrefix("/ui/", http.FileServer(Dir(s.externalUI))))
@@ -182,11 +186,11 @@ func (s *Server) Start(stage adapter.StartStage) error {
 			if err != nil {
 				return E.Cause(err, "external controller listen error")
 			}
-			s.logger.Info("restful api listening at ", listener.Addr())
+			s.logger.InfoEvent("clashapi.started", "restful api listening", log.String("address", listener.Addr().String()))
 			go func() {
 				err = s.httpServer.Serve(listener)
 				if err != nil && !errors.Is(err, http.ErrServerClosed) {
-					s.logger.Error("external controller serve error: ", err)
+					s.logger.ErrorEvent("clashapi.serve.error", "external controller serve error", log.Err(err))
 				}
 			}()
 		}
@@ -238,10 +242,10 @@ func (s *Server) SetMode(newMode string) {
 	if cacheFile != nil {
 		err := cacheFile.StoreMode(newMode)
 		if err != nil {
-			s.logger.Error(E.Cause(err, "save mode"))
+			s.logger.ErrorEvent("clash.error", "save mode", log.Err(err))
 		}
 	}
-	s.logger.Info("updated mode: ", newMode)
+	s.logger.InfoEvent("clash.mode.updated", "updated mode", log.String("mode", newMode))
 }
 
 func authentication(serverSecret string) func(next http.Handler) http.Handler {

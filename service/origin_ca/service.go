@@ -18,6 +18,7 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -33,6 +34,7 @@ import (
 	E "github.com/sagernet/sing/common/exceptions"
 	"github.com/sagernet/sing/common/ntp"
 	"github.com/sagernet/sing/service"
+	"github.com/sagernet/sing/service/filemanager"
 
 	"github.com/caddyserver/certmagic"
 )
@@ -56,13 +58,14 @@ var _ adapter.CertificateProviderService = (*Service)(nil)
 
 type Service struct {
 	certificate.Adapter
-	logger            log.ContextLogger
+	logger            log.StructuredLogger
 	ctx               context.Context
 	cancel            context.CancelFunc
 	done              chan struct{}
 	timeFunc          func() time.Time
 	httpClient        *http.Client
 	storage           certmagic.Storage
+	dataDirectory     string
 	storageIssuerKey  string
 	storageNamesKey   string
 	storageLockKey    string
@@ -77,7 +80,7 @@ type Service struct {
 	currentLeaf        *x509.Certificate
 }
 
-func NewCertificateProvider(ctx context.Context, logger log.ContextLogger, tag string, options option.CloudflareOriginCACertificateProviderOptions) (adapter.CertificateProviderService, error) {
+func NewCertificateProvider(ctx context.Context, logger log.StructuredLogger, tag string, options option.CloudflareOriginCACertificateProviderOptions) (adapter.CertificateProviderService, error) {
 	domain, err := normalizeHostnames(options.Domain)
 	if err != nil {
 		return nil, err
@@ -107,9 +110,13 @@ func NewCertificateProvider(ctx context.Context, logger log.ContextLogger, tag s
 		cancel()
 		return nil, err
 	}
-	var storage certmagic.Storage
+	var (
+		storage       certmagic.Storage
+		dataDirectory string
+	)
 	if options.DataDirectory != "" {
-		storage = &certmagic.FileStorage{Path: options.DataDirectory}
+		dataDirectory = filemanager.BasePath(ctx, os.ExpandEnv(options.DataDirectory))
+		storage = &certmagic.FileStorage{Path: dataDirectory}
 	} else {
 		storage = certmagic.Default.Storage
 	}
@@ -132,6 +139,7 @@ func NewCertificateProvider(ctx context.Context, logger log.ContextLogger, tag s
 		timeFunc:          timeFunc,
 		httpClient:        httpClient,
 		storage:           storage,
+		dataDirectory:     dataDirectory,
 		storageIssuerKey:  storageIssuerKey,
 		storageNamesKey:   storageNamesKey,
 		storageLockKey:    storageLockKey,
@@ -143,7 +151,7 @@ func NewCertificateProvider(ctx context.Context, logger log.ContextLogger, tag s
 	}, nil
 }
 
-func originCAHTTPClient(ctx context.Context, logger log.ContextLogger, options option.CloudflareOriginCACertificateProviderOptions) (*http.Client, error) {
+func originCAHTTPClient(ctx context.Context, logger log.StructuredLogger, options option.CloudflareOriginCACertificateProviderOptions) (*http.Client, error) {
 	httpClientOptions := common.PtrValueOrDefault(options.HTTPClient)
 	httpClientManager := service.FromContext[adapter.HTTPClientManager](ctx)
 	transport, err := httpClientManager.ResolveTransport(ctx, logger, httpClientOptions)
@@ -154,12 +162,21 @@ func originCAHTTPClient(ctx context.Context, logger log.ContextLogger, options o
 }
 
 func (s *Service) Start(stage adapter.StartStage) error {
-	if stage != adapter.StartStateStart {
+	if stage == adapter.StartStateInitialize {
+		if s.dataDirectory == "" {
+			return nil
+		}
+		err := filemanager.MkdirAll(s.ctx, s.dataDirectory, 0o700)
+		if err != nil {
+			return E.Cause(err, "create data directory")
+		}
+		return nil
+	} else if stage != adapter.StartStateStart {
 		return nil
 	}
 	cachedCertificate, cachedLeaf, err := s.loadCachedCertificate()
 	if err != nil {
-		s.logger.Warn(E.Cause(err, "load cached Cloudflare Origin CA certificate"))
+		s.logger.WarnEvent("origin_ca.load.error", "load cached Cloudflare Origin CA certificate", log.Err(err))
 	} else if cachedCertificate != nil {
 		s.setCurrentCertificate(cachedCertificate, cachedLeaf)
 	}
@@ -171,7 +188,7 @@ func (s *Service) Start(stage adapter.StartStage) error {
 	} else if s.shouldRenew(cachedLeaf, s.timeFunc()) {
 		err = s.issueAndStoreCertificate()
 		if err != nil {
-			s.logger.Warn(E.Cause(err, "renew cached Cloudflare Origin CA certificate"))
+			s.logger.WarnEvent("origin_ca.renew.error", "renew cached Cloudflare Origin CA certificate", log.Err(err))
 		}
 	}
 	s.done = make(chan struct{})
@@ -227,7 +244,7 @@ func (s *Service) refreshLoop() {
 		}
 		err := s.issueAndStoreCertificate()
 		if err != nil {
-			s.logger.Error(E.Cause(err, "renew Cloudflare Origin CA certificate"))
+			s.logger.ErrorEvent("origin_ca.renew.error", "renew Cloudflare Origin CA certificate", log.Err(err))
 			s.access.RLock()
 			leaf := s.currentLeaf
 			s.access.RUnlock()
@@ -270,12 +287,12 @@ func (s *Service) issueAndStoreCertificate() error {
 	defer func() {
 		err = s.storage.Unlock(context.WithoutCancel(s.ctx), s.storageLockKey)
 		if err != nil {
-			s.logger.Warn(E.Cause(err, "unlock Cloudflare Origin CA certificate storage"))
+			s.logger.WarnEvent("origin_ca.storage.unlock.error", "unlock Cloudflare Origin CA certificate storage", log.Err(err))
 		}
 	}()
 	cachedCertificate, cachedLeaf, err := s.loadCachedCertificate()
 	if err != nil {
-		s.logger.Warn(E.Cause(err, "load cached Cloudflare Origin CA certificate"))
+		s.logger.WarnEvent("origin_ca.load.error", "load cached Cloudflare Origin CA certificate", log.Err(err))
 	} else if cachedCertificate != nil && !s.shouldRenew(cachedLeaf, s.timeFunc()) {
 		s.setCurrentCertificate(cachedCertificate, cachedLeaf)
 		return nil
@@ -301,7 +318,7 @@ func (s *Service) issueAndStoreCertificate() error {
 		return E.Cause(err, "store Cloudflare Origin CA certificate")
 	}
 	s.setCurrentCertificate(tlsCertificate, leaf)
-	s.logger.Info("updated Cloudflare Origin CA certificate, expires at ", leaf.NotAfter.Format(time.RFC3339))
+	s.logger.InfoEvent("origin_ca.updated", "updated Cloudflare Origin CA certificate", log.String("expires_at", leaf.NotAfter.Format(time.RFC3339)))
 	return nil
 }
 
@@ -321,7 +338,7 @@ func (s *Service) requestCertificate(ctx context.Context) ([]byte, []byte, *tls.
 		}
 		privateKey = ecKey
 	default:
-		return nil, nil, nil, nil, E.New("unsupported Cloudflare Origin CA request type: ", s.requestType)
+		return nil, nil, nil, nil, E.New("unsupported Cloudflare Origin CA request type: ", string(s.requestType))
 	}
 	privateKeyDER, err := x509.MarshalPKCS8PrivateKey(privateKey)
 	if err != nil {

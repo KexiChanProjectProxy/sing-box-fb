@@ -7,6 +7,7 @@ import (
 	"net/http/httputil"
 	"net/netip"
 	"net/url"
+	"os"
 	"sync"
 	"time"
 
@@ -27,6 +28,7 @@ import (
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
 	"github.com/sagernet/sing/service"
+	"github.com/sagernet/sing/service/filemanager"
 )
 
 func RegisterInbound(registry *inbound.Registry) {
@@ -38,7 +40,7 @@ var _ adapter.ManagedUserInbound = (*Inbound)(nil)
 type Inbound struct {
 	inbound.Adapter
 	router       adapter.Router
-	logger       log.ContextLogger
+	logger       log.StructuredLogger
 	listener     *listener.Listener
 	tlsConfig    tls.ServerConfig
 	service      *hysteria2.Service[int]
@@ -47,7 +49,7 @@ type Inbound struct {
 	userLock     sync.RWMutex
 }
 
-func NewInbound(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.Hysteria2InboundOptions) (adapter.Inbound, error) {
+func NewInbound(ctx context.Context, router adapter.Router, logger log.StructuredLogger, tag string, options option.Hysteria2InboundOptions) (adapter.Inbound, error) {
 	options.UDPFragmentDefault = true
 	if options.TLS == nil || !options.TLS.Enabled {
 		return nil, C.ErrTLSRequired
@@ -78,23 +80,18 @@ func NewInbound(ctx context.Context, router adapter.Router, logger log.ContextLo
 	if options.Masquerade != nil && options.Masquerade.Type != "" {
 		switch options.Masquerade.Type {
 		case C.Hysterai2MasqueradeTypeFile:
-			masqueradeHandler = http.FileServer(http.Dir(options.Masquerade.FileOptions.Directory))
+			masqueradeDirectory := filemanager.BasePath(ctx, os.ExpandEnv(options.Masquerade.FileOptions.Directory))
+			_, err = filemanager.ReadDir(ctx, masqueradeDirectory)
+			if err != nil && !os.IsNotExist(err) {
+				return nil, E.Cause(err, "read masquerade directory")
+			}
+			masqueradeHandler = http.FileServer(http.Dir(masqueradeDirectory))
 		case C.Hysterai2MasqueradeTypeProxy:
 			masqueradeURL, err := url.Parse(options.Masquerade.ProxyOptions.URL)
 			if err != nil {
 				return nil, E.Cause(err, "parse masquerade URL")
 			}
-			masqueradeHandler = &httputil.ReverseProxy{
-				Rewrite: func(r *httputil.ProxyRequest) {
-					r.SetURL(masqueradeURL)
-					if !options.Masquerade.ProxyOptions.RewriteHost {
-						r.Out.Host = r.In.Host
-					}
-				},
-				ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
-					w.WriteHeader(http.StatusBadGateway)
-				},
-			}
+			masqueradeHandler = newMasqueradeProxy(masqueradeURL, options.Masquerade.ProxyOptions)
 		case C.Hysterai2MasqueradeTypeString:
 			masqueradeHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if options.Masquerade.StringOptions.StatusCode != 0 {
@@ -122,14 +119,21 @@ func NewInbound(ctx context.Context, router adapter.Router, logger log.ContextLo
 		}),
 		tlsConfig: tlsConfig,
 	}
-	var udpTimeout time.Duration
+	udpTimeout := C.UDPTimeout
 	if options.UDPTimeout != 0 {
 		udpTimeout = time.Duration(options.UDPTimeout)
-	} else {
-		udpTimeout = C.UDPTimeout
 	}
 	var realmOptions *realm.Options
 	if options.Realm != nil {
+		if options.Realm.IPVersion != 0 && options.ListenOptions.Listen != nil {
+			listenAddr := netip.Addr(*options.ListenOptions.Listen).Unmap()
+			if options.Realm.IPVersion == 6 && listenAddr.Is4() {
+				return nil, E.New("realm.ip_version 6 conflicts with listen address ", listenAddr)
+			}
+			if options.Realm.IPVersion == 4 && listenAddr.Is6() && !listenAddr.IsUnspecified() {
+				return nil, E.New("realm.ip_version 4 conflicts with listen address ", listenAddr)
+			}
+		}
 		queryOptions, err := adapter.DNSQueryOptionsFrom(ctx, options.Realm.STUNDomainResolver)
 		if err != nil {
 			return nil, err
@@ -155,7 +159,14 @@ func NewInbound(ctx context.Context, router adapter.Router, logger log.ContextLo
 				}
 				return dnsRouter.Lookup(ctx, host, dnsOptions)
 			},
-			Logger: logger,
+			Logger:    logger,
+			IPVersion: options.Realm.IPVersion,
+		}
+		if options.Realm.PortMapping != nil && options.Realm.PortMapping.Enabled {
+			realmOptions.PortMapping = &realm.PortMappingOptions{
+				Timeout:  time.Duration(options.Realm.PortMapping.Timeout),
+				Lifetime: time.Duration(options.Realm.PortMapping.Lifetime),
+			}
 		}
 	}
 	hysteriaService, err := hysteria2.NewService[int](hysteria2.ServiceOptions{
@@ -232,37 +243,49 @@ func (h *Inbound) ReplaceUsers(users []adapter.ManagedUser) error {
 	return nil
 }
 
+func (h *Inbound) lookupManagedUser(userID int) (panelUserID, userName string) {
+	h.userLock.RLock()
+	defer h.userLock.RUnlock()
+	if userID >= 0 && userID < len(h.userNameList) {
+		userName = h.userNameList[userID]
+		if userID < len(h.userIDList) {
+			panelUserID = h.userIDList[userID]
+		}
+	}
+	return
+}
+
+func newMasqueradeProxy(masqueradeURL *url.URL, options option.Hysteria2MasqueradeProxy) *httputil.ReverseProxy {
+	return &httputil.ReverseProxy{
+		Rewrite: func(r *httputil.ProxyRequest) {
+			r.SetURL(masqueradeURL)
+			if options.XForwarded {
+				r.SetXForwarded()
+			}
+			if !options.RewriteHost {
+				r.Out.Host = r.In.Host
+			}
+		},
+		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, _ error) { w.WriteHeader(http.StatusBadGateway) },
+	}
+}
+
 func (h *Inbound) NewConnectionEx(ctx context.Context, conn net.Conn, source M.Socksaddr, destination M.Socksaddr, onClose N.CloseHandlerFunc) {
 	ctx = log.ContextWithNewID(ctx)
-	var metadata adapter.InboundContext
-	metadata.Inbound = h.Tag()
-	metadata.InboundType = h.Type()
+	metadata := adapter.InboundContext{Inbound: h.Tag(), InboundType: h.Type()}
 	//nolint:staticcheck
 	metadata.InboundDetour = h.listener.ListenOptions().Detour
 	//nolint:staticcheck
 	metadata.OriginDestination = h.listener.UDPAddr()
 	metadata.Source = source
 	metadata.Destination = destination
-	h.logger.InfoContext(ctx, "inbound connection from ", metadata.Source)
 	userID, _ := auth.UserFromContext[int](ctx)
-	h.userLock.RLock()
-	userCount := len(h.userNameList)
-	panelUserID := ""
-	userNme := ""
-	if userID < userCount {
-		if userID < len(h.userIDList) {
-			panelUserID = h.userIDList[userID]
-		}
-		userNme = h.userNameList[userID]
-	}
-	h.userLock.RUnlock()
-	if userNme != "" {
+	panelUserID, userName := h.lookupManagedUser(userID)
+	if userName != "" {
 		metadata.UserID = panelUserID
-		metadata.User = userNme
-		h.logger.InfoContext(ctx, "[", userNme, "] inbound connection to ", metadata.Destination)
-	} else {
-		h.logger.InfoContext(ctx, "inbound connection to ", metadata.Destination)
+		metadata.User = userName
 	}
+	adapter.LogInboundConnection(h.logger, ctx, metadata)
 	h.router.RouteConnectionEx(ctx, conn, metadata, onClose)
 }
 
@@ -277,26 +300,13 @@ func (h *Inbound) NewPacketConnectionEx(ctx context.Context, conn N.PacketConn, 
 	metadata.OriginDestination = h.listener.UDPAddr()
 	metadata.Source = source
 	metadata.Destination = destination
-	h.logger.InfoContext(ctx, "inbound packet connection from ", metadata.Source)
 	userID, _ := auth.UserFromContext[int](ctx)
-	h.userLock.RLock()
-	userCount := len(h.userNameList)
-	panelUserID := ""
-	userNme := ""
-	if userID < userCount {
-		if userID < len(h.userIDList) {
-			panelUserID = h.userIDList[userID]
-		}
-		userNme = h.userNameList[userID]
-	}
-	h.userLock.RUnlock()
-	if userNme != "" {
+	panelUserID, userName := h.lookupManagedUser(userID)
+	if userName != "" {
 		metadata.UserID = panelUserID
-		metadata.User = userNme
-		h.logger.InfoContext(ctx, "[", userNme, "] inbound packet connection to ", metadata.Destination)
-	} else {
-		h.logger.InfoContext(ctx, "inbound packet connection to ", metadata.Destination)
+		metadata.User = userName
 	}
+	adapter.LogInboundPacket(h.logger, ctx, metadata)
 	h.router.RoutePacketConnectionEx(ctx, conn, metadata, onClose)
 }
 

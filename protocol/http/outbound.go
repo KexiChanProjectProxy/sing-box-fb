@@ -2,6 +2,8 @@ package http
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"net"
 	"os"
 
@@ -13,7 +15,7 @@ import (
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing/common"
-	"github.com/sagernet/sing/common/logger"
+	E "github.com/sagernet/sing/common/exceptions"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
 	sHTTP "github.com/sagernet/sing/protocol/http"
@@ -21,15 +23,16 @@ import (
 
 func RegisterOutbound(registry *outbound.Registry) {
 	outbound.Register[option.HTTPOutboundOptions](registry, C.TypeHTTP, NewOutbound)
+	outbound.Register[option.HTTPDynamicOutboundOptions](registry, C.TypeHTTPDynamic, NewDynamicOutbound)
 }
 
 type Outbound struct {
 	outbound.Adapter
-	logger logger.ContextLogger
+	logger log.StructuredLogger
 	client *sHTTP.Client
 }
 
-func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.HTTPOutboundOptions) (adapter.Outbound, error) {
+func NewOutbound(ctx context.Context, router adapter.Router, logger log.StructuredLogger, tag string, options option.HTTPOutboundOptions) (adapter.Outbound, error) {
 	outboundDialer, err := dialer.New(ctx, options.DialerOptions, options.ServerIsDomain())
 	if err != nil {
 		return nil, err
@@ -56,10 +59,72 @@ func (h *Outbound) DialContext(ctx context.Context, network string, destination 
 	ctx, metadata := adapter.ExtendContext(ctx)
 	metadata.Outbound = h.Tag()
 	metadata.Destination = destination
-	h.logger.InfoContext(ctx, "outbound connection to ", destination)
+	adapter.LogOutboundConnection(h.logger, ctx, destination)
+
 	return h.client.DialContext(ctx, network, destination)
 }
 
 func (h *Outbound) ListenPacket(ctx context.Context, destination M.Socksaddr) (net.PacketConn, error) {
 	return nil, os.ErrInvalid
+}
+
+type DynamicOutbound struct {
+	outbound.Adapter
+	logger        log.StructuredLogger
+	clientOptions sHTTP.Options
+}
+
+func NewDynamicOutbound(ctx context.Context, router adapter.Router, logger log.StructuredLogger, tag string, options option.HTTPDynamicOutboundOptions) (adapter.Outbound, error) {
+	outboundDialer, err := dialer.New(ctx, options.DialerOptions, options.ServerIsDomain())
+	if err != nil {
+		return nil, err
+	}
+	detour, err := tls.NewDialerFromOptions(ctx, logger, outboundDialer, options.Server, common.PtrValueOrDefault(options.TLS))
+	if err != nil {
+		return nil, err
+	}
+	return &DynamicOutbound{
+		Adapter: outbound.NewAdapterWithDialerOptions(C.TypeHTTPDynamic, tag, []string{N.NetworkTCP}, options.DialerOptions),
+		logger:  logger,
+		clientOptions: sHTTP.Options{
+			Dialer:   detour,
+			Server:   options.ServerOptions.Build(),
+			Username: options.Username,
+			Path:     options.Path,
+			Headers:  options.Headers.Build(),
+		},
+	}, nil
+}
+
+func (h *DynamicOutbound) DialContext(ctx context.Context, network string, destination M.Socksaddr) (net.Conn, error) {
+	ctx, metadata := adapter.ExtendContext(ctx)
+	metadata.Outbound = h.Tag()
+	metadata.Destination = destination
+	adapter.LogOutboundConnection(h.logger, ctx, destination)
+
+	password, err := dynamicHTTPPassword(metadata)
+	if err != nil {
+		return nil, err
+	}
+	clientOptions := h.clientOptions
+	clientOptions.Password = password
+	clientOptions.Headers = clientOptions.Headers.Clone()
+	return sHTTP.NewClient(clientOptions).DialContext(ctx, network, destination)
+}
+
+func (h *DynamicOutbound) ListenPacket(ctx context.Context, destination M.Socksaddr) (net.PacketConn, error) {
+	return nil, os.ErrInvalid
+}
+
+func dynamicHTTPPassword(metadata *adapter.InboundContext) (string, error) {
+	if metadata == nil || metadata.User == "" {
+		return "", E.New("http-dynamic outbound: inbound username is required")
+	}
+	if !metadata.Source.Addr.IsValid() {
+		return "", E.New("http-dynamic outbound: inbound source IP is required")
+	}
+	sum := sha256.Sum256([]byte(metadata.User + metadata.Source.Addr.String()))
+	var password [16]byte
+	hex.Encode(password[:], sum[:8])
+	return string(password[:]), nil
 }

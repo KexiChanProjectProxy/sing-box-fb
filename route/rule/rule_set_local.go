@@ -2,7 +2,6 @@ package rule
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -12,12 +11,12 @@ import (
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/common/srs"
 	C "github.com/sagernet/sing-box/constant"
+	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing/common"
 	E "github.com/sagernet/sing/common/exceptions"
 	F "github.com/sagernet/sing/common/format"
 	"github.com/sagernet/sing/common/json"
-	"github.com/sagernet/sing/common/logger"
 	"github.com/sagernet/sing/common/x/list"
 	"github.com/sagernet/sing/service/filemanager"
 
@@ -28,7 +27,7 @@ var _ adapter.RuleSet = (*LocalRuleSet)(nil)
 
 type LocalRuleSet struct {
 	ctx        context.Context
-	logger     logger.Logger
+	logger     log.StructuredLogger
 	tag        string
 	access     sync.RWMutex
 	rules      []adapter.HeadlessRule
@@ -39,11 +38,11 @@ type LocalRuleSet struct {
 	refs       atomic.Int32
 }
 
-func NewLocalRuleSet(ctx context.Context, logger logger.Logger, options option.RuleSet) (*LocalRuleSet, error) {
+func NewLocalRuleSet(ctx context.Context, logger log.StructuredLogger, tag string, options option.RuleSet) (*LocalRuleSet, error) {
 	ruleSet := &LocalRuleSet{
 		ctx:        ctx,
 		logger:     logger,
-		tag:        options.Tag,
+		tag:        tag,
 		fileFormat: options.Format,
 	}
 	if options.Type == C.RuleSetTypeInline {
@@ -55,7 +54,7 @@ func NewLocalRuleSet(ctx context.Context, logger logger.Logger, options option.R
 			return nil, err
 		}
 	} else {
-		filePath := filemanager.BasePath(ctx, options.LocalOptions.Path)
+		filePath := filemanager.BasePath(ctx, strings.ReplaceAll(options.LocalOptions.Path, C.RuleSetTagPlaceholder, tag))
 		filePath, _ = filepath.Abs(filePath)
 		err := ruleSet.reloadFile(filePath)
 		if err != nil {
@@ -66,7 +65,7 @@ func NewLocalRuleSet(ctx context.Context, logger logger.Logger, options option.R
 			Callback: func(path string) {
 				uErr := ruleSet.reloadFile(path)
 				if uErr != nil {
-					logger.Error(E.Cause(uErr, "reload rule-set ", options.Tag))
+					ruleSet.logger.ErrorEvent("route.rule_set.error", "reload rule-set", log.String("rule_set", tag), log.Err(uErr))
 				}
 			},
 		})
@@ -90,7 +89,7 @@ func (s *LocalRuleSet) StartContext(ctx context.Context, startContext *adapter.H
 	if s.watcher != nil {
 		err := s.watcher.Start()
 		if err != nil {
-			s.logger.Error(E.Cause(err, "watch rule-set file"))
+			s.logger.ErrorEvent("route.rule_set.error", "watch rule-set file", log.String("rule_set", s.tag), log.Err(err))
 		}
 	}
 	return nil
@@ -100,7 +99,7 @@ func (s *LocalRuleSet) reloadFile(path string) error {
 	var ruleSet option.PlainRuleSetCompat
 	switch s.fileFormat {
 	case C.RuleSetFormatSource, "":
-		content, err := os.ReadFile(path)
+		content, err := filemanager.ReadFile(s.ctx, path)
 		if err != nil {
 			return err
 		}
@@ -110,10 +109,11 @@ func (s *LocalRuleSet) reloadFile(path string) error {
 		}
 
 	case C.RuleSetFormatBinary:
-		setFile, err := os.Open(path)
+		setFile, err := filemanager.Open(s.ctx, path)
 		if err != nil {
 			return err
 		}
+		defer setFile.Close()
 		ruleSet, err = srs.Read(setFile, false)
 		if err != nil {
 			return err
@@ -199,19 +199,9 @@ func (s *LocalRuleSet) Close() error {
 }
 
 func (s *LocalRuleSet) Match(metadata *adapter.InboundContext) bool {
-	return !s.matchStates(metadata).isEmpty()
+	return matchAnyHeadlessRule(s.rules, metadata)
 }
 
-func (s *LocalRuleSet) matchStates(metadata *adapter.InboundContext) ruleMatchStateSet {
-	return s.matchStatesWithBase(metadata, 0)
-}
-
-func (s *LocalRuleSet) matchStatesWithBase(metadata *adapter.InboundContext, base ruleMatchState) ruleMatchStateSet {
-	var stateSet ruleMatchStateSet
-	for _, rule := range s.rules {
-		nestedMetadata := *metadata
-		nestedMetadata.ResetRuleMatchCache()
-		stateSet = stateSet.merge(matchHeadlessRuleStatesWithBase(rule, &nestedMetadata, base))
-	}
-	return stateSet
+func (s *LocalRuleSet) mergeableRule() *DefaultHeadlessRule {
+	return mergeableRuleIn(s.rules)
 }

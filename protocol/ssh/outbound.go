@@ -20,9 +20,9 @@ import (
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing/common"
 	E "github.com/sagernet/sing/common/exceptions"
-	"github.com/sagernet/sing/common/logger"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
+	"github.com/sagernet/sing/service/filemanager"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -36,7 +36,7 @@ var _ adapter.InterfaceUpdateListener = (*Outbound)(nil)
 type Outbound struct {
 	outbound.Adapter
 	ctx               context.Context
-	logger            logger.ContextLogger
+	logger            log.StructuredLogger
 	dialer            N.Dialer
 	serverAddr        M.Socksaddr
 	user              string
@@ -52,7 +52,7 @@ type Outbound struct {
 	client            *ssh.Client
 }
 
-func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.SSHOutboundOptions) (adapter.Outbound, error) {
+func NewOutbound(ctx context.Context, router adapter.Router, logger log.StructuredLogger, tag string, options option.SSHOutboundOptions) (adapter.Outbound, error) {
 	outboundDialer, err := dialer.New(ctx, options.DialerOptions, options.ServerIsDomain())
 	if err != nil {
 		return nil, err
@@ -88,7 +88,7 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 			privateKey = []byte(strings.Join(options.PrivateKey, "\n"))
 		} else {
 			var err error
-			privateKey, err = os.ReadFile(os.ExpandEnv(options.PrivateKeyPath))
+			privateKey, err = filemanager.ReadFile(ctx, os.ExpandEnv(options.PrivateKeyPath))
 			if err != nil {
 				return nil, E.Cause(err, "read private key")
 			}
@@ -109,7 +109,7 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 		for _, hostKey := range options.HostKey {
 			key, _, _, _, err := ssh.ParseAuthorizedKey([]byte(hostKey))
 			if err != nil {
-				return nil, E.New("parse host key ", key)
+				return nil, E.Cause(err, "parse host key: ", hostKey)
 			}
 			outbound.hostKey = append(outbound.hostKey, key)
 		}

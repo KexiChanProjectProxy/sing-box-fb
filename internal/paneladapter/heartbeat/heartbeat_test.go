@@ -14,8 +14,7 @@ import (
 	"github.com/sagernet/sing-box/internal/paneladapter/client"
 	"github.com/sagernet/sing-box/internal/paneladapter/contract"
 	"github.com/sagernet/sing-box/internal/paneladapter/state"
-
-	"github.com/sagernet/sing/common/logger"
+	"github.com/sagernet/sing-box/log"
 )
 
 // ---------------------------------------------------------------------------
@@ -107,7 +106,7 @@ func TestBuildInbounds_StatusOK(t *testing.T) {
 		UserLoadStatus: string(contract.UserLoadStatusOK),
 	}
 
-	h := NewHeartbeat(nil, newTestStore(st), testNodeID, constant.Version, "", WithLogger(logger.NOP()))
+	h := NewHeartbeat(nil, newTestStore(st), testNodeID, constant.Version, "", WithLogger(log.NewNOPFactory().Logger()))
 	inbounds := h.buildInbounds(st)
 
 	if len(inbounds) != 1 {
@@ -134,7 +133,7 @@ func TestBuildInbounds_StatusStale(t *testing.T) {
 		UserLoadStatus: string(contract.UserLoadStatusStale),
 	}
 
-	h := NewHeartbeat(nil, newTestStore(st), testNodeID, constant.Version, "", WithLogger(logger.NOP()))
+	h := NewHeartbeat(nil, newTestStore(st), testNodeID, constant.Version, "", WithLogger(log.NewNOPFactory().Logger()))
 	inbounds := h.buildInbounds(st)
 
 	if inbounds[0].Status != contract.UserLoadStatusStale {
@@ -151,7 +150,7 @@ func TestBuildInbounds_StatusEmptyInitialLoad(t *testing.T) {
 		Protocol:  "hysteria2",
 	}
 
-	h := NewHeartbeat(nil, newTestStore(st), testNodeID, constant.Version, "", WithLogger(logger.NOP()))
+	h := NewHeartbeat(nil, newTestStore(st), testNodeID, constant.Version, "", WithLogger(log.NewNOPFactory().Logger()))
 	inbounds := h.buildInbounds(st)
 
 	if inbounds[0].Status != contract.UserLoadStatusEmptyInitialLoad {
@@ -168,7 +167,7 @@ func TestBuildInbounds_StatusRevisionConflict(t *testing.T) {
 		UserLoadStatus: string(contract.UserLoadStatusRevisionConflict),
 	}
 
-	h := NewHeartbeat(nil, newTestStore(st), testNodeID, constant.Version, "", WithLogger(logger.NOP()))
+	h := NewHeartbeat(nil, newTestStore(st), testNodeID, constant.Version, "", WithLogger(log.NewNOPFactory().Logger()))
 	inbounds := h.buildInbounds(st)
 
 	if inbounds[0].Status != contract.UserLoadStatusRevisionConflict {
@@ -185,7 +184,7 @@ func TestBuildInbounds_StatusApplyFailed(t *testing.T) {
 		UserLoadStatus: string(contract.UserLoadStatusApplyFailed),
 	}
 
-	h := NewHeartbeat(nil, newTestStore(st), testNodeID, constant.Version, "", WithLogger(logger.NOP()))
+	h := NewHeartbeat(nil, newTestStore(st), testNodeID, constant.Version, "", WithLogger(log.NewNOPFactory().Logger()))
 	inbounds := h.buildInbounds(st)
 
 	if inbounds[0].Status != contract.UserLoadStatusApplyFailed {
@@ -208,7 +207,7 @@ func TestBuildInbounds_UnknownProtocol_UnsupportedStatus(t *testing.T) {
 		UserCount:      3,
 	}
 
-	h := NewHeartbeat(nil, newTestStore(st), testNodeID, constant.Version, "", WithLogger(logger.NOP()))
+	h := NewHeartbeat(nil, newTestStore(st), testNodeID, constant.Version, "", WithLogger(log.NewNOPFactory().Logger()))
 	inbounds := h.buildInbounds(st)
 
 	if inbounds[0].Status != contract.UserLoadStatusUnsupportedProto {
@@ -228,7 +227,7 @@ func TestBuildInbounds_UnknownProtocol_EmptyStatus(t *testing.T) {
 		Protocol:  "trojan", // not in SupportedProtocols
 	}
 
-	h := NewHeartbeat(nil, newTestStore(st), testNodeID, constant.Version, "", WithLogger(logger.NOP()))
+	h := NewHeartbeat(nil, newTestStore(st), testNodeID, constant.Version, "", WithLogger(log.NewNOPFactory().Logger()))
 	inbounds := h.buildInbounds(st)
 
 	if inbounds[0].Status != contract.UserLoadStatusUnsupportedProto {
@@ -257,7 +256,7 @@ func TestBuildInbounds_SupportedProtocols(t *testing.T) {
 		UserLoadStatus: string(contract.UserLoadStatusOK),
 	}
 
-	h := NewHeartbeat(nil, newTestStore(st), testNodeID, constant.Version, "", WithLogger(logger.NOP()))
+	h := NewHeartbeat(nil, newTestStore(st), testNodeID, constant.Version, "", WithLogger(log.NewNOPFactory().Logger()))
 	inbounds := h.buildInbounds(st)
 
 	if len(inbounds) != 3 {
@@ -283,7 +282,7 @@ func TestPendingRevision_ApplyFailed(t *testing.T) {
 		UserLoadStatus: string(contract.UserLoadStatusApplyFailed),
 	}
 
-	h := NewHeartbeat(nil, newTestStore(st), testNodeID, constant.Version, "", WithLogger(logger.NOP()))
+	h := NewHeartbeat(nil, newTestStore(st), testNodeID, constant.Version, "", WithLogger(log.NewNOPFactory().Logger()))
 	pending := h.pendingRevision(st)
 
 	if pending == nil {
@@ -304,7 +303,7 @@ func TestPendingRevision_UnsupportedProtocol_NoUserRevision(t *testing.T) {
 		UserRevision:   "", // no user revision applied
 	}
 
-	h := NewHeartbeat(nil, newTestStore(st), testNodeID, constant.Version, "", WithLogger(logger.NOP()))
+	h := NewHeartbeat(nil, newTestStore(st), testNodeID, constant.Version, "", WithLogger(log.NewNOPFactory().Logger()))
 	pending := h.pendingRevision(st)
 
 	if pending == nil {
@@ -325,7 +324,7 @@ func TestPendingRevision_OK_NoPending(t *testing.T) {
 		UserRevision:   "u-rev-1",
 	}
 
-	h := NewHeartbeat(nil, newTestStore(st), testNodeID, constant.Version, "", WithLogger(logger.NOP()))
+	h := NewHeartbeat(nil, newTestStore(st), testNodeID, constant.Version, "", WithLogger(log.NewNOPFactory().Logger()))
 	pending := h.pendingRevision(st)
 
 	if pending != nil {
@@ -337,7 +336,7 @@ func TestPendingRevision_EmptyInbounds(t *testing.T) {
 	st := defaultState()
 	st.Config.Revision = "rev-1"
 
-	h := NewHeartbeat(nil, newTestStore(st), testNodeID, constant.Version, "", WithLogger(logger.NOP()))
+	h := NewHeartbeat(nil, newTestStore(st), testNodeID, constant.Version, "", WithLogger(log.NewNOPFactory().Logger()))
 	pending := h.pendingRevision(st)
 
 	if pending != nil {
@@ -356,7 +355,7 @@ func TestPendingRevision_UnsupportedProtocol_WithUserRevision(t *testing.T) {
 		UserRevision:   "u-rev-old",
 	}
 
-	h := NewHeartbeat(nil, newTestStore(st), testNodeID, constant.Version, "", WithLogger(logger.NOP()))
+	h := NewHeartbeat(nil, newTestStore(st), testNodeID, constant.Version, "", WithLogger(log.NewNOPFactory().Logger()))
 	pending := h.pendingRevision(st)
 
 	// Has user revision, so not considered pending
@@ -384,7 +383,7 @@ func TestBuildRuntimeMetrics_AggregateOnly(t *testing.T) {
 
 	h := NewHeartbeat(nil, store, testNodeID, constant.Version, "",
 		WithStartTimeProvider(startProvider),
-		WithLogger(logger.NOP()),
+		WithLogger(log.NewNOPFactory().Logger()),
 	)
 	h.metrics = metrics
 
@@ -427,7 +426,7 @@ func TestBuildRuntimeMetrics_NoProvider(t *testing.T) {
 
 	h := NewHeartbeat(nil, store, testNodeID, constant.Version, "",
 		WithStartTimeProvider(startProvider),
-		WithLogger(logger.NOP()),
+		WithLogger(log.NewNOPFactory().Logger()),
 	)
 	// No metrics provider set — connections should be 0
 
@@ -519,7 +518,7 @@ func TestSendHeartbeat_DoesNotExposeSecrets(t *testing.T) {
 	}
 
 	store := newTestStore(st)
-	h := NewHeartbeat(cl, store, testNodeID, constant.Version, "1.0.0", WithLogger(logger.NOP()))
+	h := NewHeartbeat(cl, store, testNodeID, constant.Version, "1.0.0", WithLogger(log.NewNOPFactory().Logger()))
 
 	ctx := context.Background()
 	if err := h.SendHeartbeat(ctx); err != nil {
@@ -567,7 +566,7 @@ func TestSendHeartbeat_Success(t *testing.T) {
 	}
 
 	store := newTestStore(st)
-	h := NewHeartbeat(cl, store, testNodeID, constant.Version, "1.0.0", WithLogger(logger.NOP()))
+	h := NewHeartbeat(cl, store, testNodeID, constant.Version, "1.0.0", WithLogger(log.NewNOPFactory().Logger()))
 
 	ctx := context.Background()
 	if err := h.SendHeartbeat(ctx); err != nil {
@@ -658,7 +657,7 @@ func TestSendHeartbeat_WithPendingRevision(t *testing.T) {
 	}
 
 	store := newTestStore(st)
-	h := NewHeartbeat(cl, store, testNodeID, constant.Version, "1.0.0", WithLogger(logger.NOP()))
+	h := NewHeartbeat(cl, store, testNodeID, constant.Version, "1.0.0", WithLogger(log.NewNOPFactory().Logger()))
 
 	ctx := context.Background()
 	if err := h.SendHeartbeat(ctx); err != nil {
@@ -693,7 +692,7 @@ func TestSendHeartbeat_BestEffort_ErrorLogged(t *testing.T) {
 	}
 
 	store := newTestStore(st)
-	h := NewHeartbeat(cl, store, testNodeID, constant.Version, "1.0.0", WithLogger(logger.NOP()))
+	h := NewHeartbeat(cl, store, testNodeID, constant.Version, "1.0.0", WithLogger(log.NewNOPFactory().Logger()))
 
 	ctx := context.Background()
 	err = h.SendHeartbeat(ctx)
@@ -740,7 +739,7 @@ func TestSendHeartbeat_MultipleInbounds(t *testing.T) {
 	}
 
 	store := newTestStore(st)
-	h := NewHeartbeat(cl, store, testNodeID, constant.Version, "1.0.0", WithLogger(logger.NOP()))
+	h := NewHeartbeat(cl, store, testNodeID, constant.Version, "1.0.0", WithLogger(log.NewNOPFactory().Logger()))
 
 	ctx := context.Background()
 	if err := h.SendHeartbeat(ctx); err != nil {
@@ -790,7 +789,7 @@ func TestSendHeartbeat_AppliedConfigRevisionHeader(t *testing.T) {
 	}
 
 	store := newTestStore(st)
-	h := NewHeartbeat(cl, store, testNodeID, constant.Version, "1.0.0", WithLogger(logger.NOP()))
+	h := NewHeartbeat(cl, store, testNodeID, constant.Version, "1.0.0", WithLogger(log.NewNOPFactory().Logger()))
 
 	ctx := context.Background()
 	if err := h.SendHeartbeat(ctx); err != nil {
@@ -831,7 +830,7 @@ func TestBuildInbounds_AllInboundsIncluded(t *testing.T) {
 		UserLoadStatus: string(contract.UserLoadStatusOK), // overridden
 	}
 
-	h := NewHeartbeat(nil, newTestStore(st), testNodeID, constant.Version, "", WithLogger(logger.NOP()))
+	h := NewHeartbeat(nil, newTestStore(st), testNodeID, constant.Version, "", WithLogger(log.NewNOPFactory().Logger()))
 	inbounds := h.buildInbounds(st)
 
 	if len(inbounds) != 3 {
@@ -876,7 +875,7 @@ func TestPendingConfigurationRevision_SetWhenApplyFailed(t *testing.T) {
 	}
 
 	store := newTestStore(st)
-	h := NewHeartbeat(cl, store, testNodeID, constant.Version, "1.0.0", WithLogger(logger.NOP()))
+	h := NewHeartbeat(cl, store, testNodeID, constant.Version, "1.0.0", WithLogger(log.NewNOPFactory().Logger()))
 
 	ctx := context.Background()
 	if err := h.SendHeartbeat(ctx); err != nil {
@@ -920,7 +919,7 @@ func TestBuildRuntimeMetrics_WithTracker(t *testing.T) {
 
 	h := NewHeartbeat(nil, store, testNodeID, constant.Version, "",
 		WithStartTimeProvider(startProvider),
-		WithLogger(logger.NOP()),
+		WithLogger(log.NewNOPFactory().Logger()),
 	)
 	h.metrics = metrics
 
@@ -956,7 +955,7 @@ func TestSendHeartbeat_CancelledContext(t *testing.T) {
 	}
 
 	store := newTestStore(st)
-	h := NewHeartbeat(cl, store, testNodeID, constant.Version, "1.0.0", WithLogger(logger.NOP()))
+	h := NewHeartbeat(cl, store, testNodeID, constant.Version, "1.0.0", WithLogger(log.NewNOPFactory().Logger()))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
@@ -988,7 +987,7 @@ func TestSendHeartbeat_ObservedAtUTC(t *testing.T) {
 	}
 
 	store := newTestStore(st)
-	h := NewHeartbeat(cl, store, testNodeID, constant.Version, "1.0.0", WithLogger(logger.NOP()))
+	h := NewHeartbeat(cl, store, testNodeID, constant.Version, "1.0.0", WithLogger(log.NewNOPFactory().Logger()))
 
 	ctx := context.Background()
 	if err := h.SendHeartbeat(ctx); err != nil {

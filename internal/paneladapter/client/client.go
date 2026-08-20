@@ -25,7 +25,6 @@ import (
 	"github.com/sagernet/sing-box/internal/paneladapter/contract"
 	"github.com/sagernet/sing-box/log"
 	E "github.com/sagernet/sing/common/exceptions"
-	"github.com/sagernet/sing/common/logger"
 )
 
 // ---------------------------------------------------------------------------
@@ -186,7 +185,7 @@ func New(baseURL, nodeID, token string, opts ...Option) (*Client, error) {
 
 	// Apply defaults before options so options can override.
 	c.httpClient = &http.Client{}
-	c.logger = logger.NOP()
+	c.logger = log.NewNOPFactory().Logger()
 
 	for _, opt := range opts {
 		opt(c)

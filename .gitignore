@@ -21,6 +21,7 @@
 CLAUDE.md
 AGENTS.md
 /.claude/
+/.sisyphus/
 /.omo/
 /mock-panel-server
 /reporter.test

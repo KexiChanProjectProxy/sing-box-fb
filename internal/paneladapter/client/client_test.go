@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/sagernet/sing-box/internal/paneladapter/contract"
+	"github.com/sagernet/sing-box/log"
 )
 
 // ---------------------------------------------------------------------------
@@ -1080,6 +1081,49 @@ func (l *captureLogger) FatalContext(_ context.Context, args ...any) {
 }
 func (l *captureLogger) PanicContext(_ context.Context, args ...any) {
 	l.entries = append(l.entries, logEntry{"panic", fmt.Sprint(args...)})
+}
+
+func (l *captureLogger) TraceEvent(event string, message string, fields ...log.Field) {
+	l.entries = append(l.entries, logEntry{"trace", message})
+}
+func (l *captureLogger) DebugEvent(event string, message string, fields ...log.Field) {
+	l.entries = append(l.entries, logEntry{"debug", message})
+}
+func (l *captureLogger) InfoEvent(event string, message string, fields ...log.Field) {
+	l.entries = append(l.entries, logEntry{"info", message})
+}
+func (l *captureLogger) WarnEvent(event string, message string, fields ...log.Field) {
+	l.entries = append(l.entries, logEntry{"warn", message})
+}
+func (l *captureLogger) ErrorEvent(event string, message string, fields ...log.Field) {
+	l.entries = append(l.entries, logEntry{"error", message})
+}
+func (l *captureLogger) FatalEvent(event string, message string, fields ...log.Field) {
+	l.entries = append(l.entries, logEntry{"fatal", message})
+}
+func (l *captureLogger) PanicEvent(event string, message string, fields ...log.Field) {
+	l.entries = append(l.entries, logEntry{"panic", message})
+}
+func (l *captureLogger) TraceEventContext(_ context.Context, event string, message string, fields ...log.Field) {
+	l.entries = append(l.entries, logEntry{"trace", message})
+}
+func (l *captureLogger) DebugEventContext(_ context.Context, event string, message string, fields ...log.Field) {
+	l.entries = append(l.entries, logEntry{"debug", message})
+}
+func (l *captureLogger) InfoEventContext(_ context.Context, event string, message string, fields ...log.Field) {
+	l.entries = append(l.entries, logEntry{"info", message})
+}
+func (l *captureLogger) WarnEventContext(_ context.Context, event string, message string, fields ...log.Field) {
+	l.entries = append(l.entries, logEntry{"warn", message})
+}
+func (l *captureLogger) ErrorEventContext(_ context.Context, event string, message string, fields ...log.Field) {
+	l.entries = append(l.entries, logEntry{"error", message})
+}
+func (l *captureLogger) FatalEventContext(_ context.Context, event string, message string, fields ...log.Field) {
+	l.entries = append(l.entries, logEntry{"fatal", message})
+}
+func (l *captureLogger) PanicEventContext(_ context.Context, event string, message string, fields ...log.Field) {
+	l.entries = append(l.entries, logEntry{"panic", message})
 }
 
 func TestLogsDoNotContainSecrets(t *testing.T) {

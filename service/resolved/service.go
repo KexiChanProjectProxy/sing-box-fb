@@ -38,7 +38,7 @@ func RegisterService(registry *boxService.Registry) {
 type Service struct {
 	boxService.Adapter
 	ctx                   context.Context
-	logger                log.ContextLogger
+	logger                log.StructuredLogger
 	network               adapter.NetworkManager
 	dnsRouter             adapter.DNSRouter
 	listener              *listener.Listener
@@ -61,11 +61,11 @@ type TransportLink struct {
 	// dnsOverTLSFallback bool
 }
 
-func NewService(ctx context.Context, logger log.ContextLogger, tag string, options option.ResolvedServiceOptions) (adapter.Service, error) {
+func NewService(ctx context.Context, logger log.StructuredLogger, tag string, options option.ResolvedServiceOptions) (adapter.Service, error) {
 	inbound := &Service{
 		Adapter:   boxService.NewAdapter(C.TypeResolved, tag),
 		ctx:       ctx,
-		logger:    logger,
+		logger:    logger.(log.StructuredLogger),
 		network:   service.FromContext[adapter.NetworkManager](ctx),
 		dnsRouter: service.FromContext[adapter.DNSRouter](ctx),
 		links:     make(map[int32]*TransportLink),
@@ -154,7 +154,7 @@ func (i *Service) exchangePacket(buffer *buf.Buffer, oob []byte, source M.Socksa
 	ctx := log.ContextWithNewID(i.ctx)
 	err := i.exchangePacket0(ctx, buffer, oob, source)
 	if err != nil {
-		i.logger.ErrorContext(ctx, "process DNS packet: ", err)
+		i.logger.ErrorEventContext(ctx, "dns.packet.error", "process DNS packet", log.Err(err))
 	}
 }
 
@@ -173,7 +173,7 @@ func (i *Service) exchangePacket0(ctx context.Context, buffer *buf.Buffer, oob [
 	if err != nil {
 		return err
 	}
-	responseBuffer, err := dns.TruncateDNSMessage(&message, response, 0)
+	responseBuffer, err := dns.TruncateDNSMessage(&message, response, 0, 0)
 	if err != nil {
 		return err
 	}
@@ -204,10 +204,12 @@ func (i *Service) onNetworkUpdate() {
 }
 
 func (conf *TransportLink) nameList(ndots int, name string) []string {
-	search := common.Map(common.Filter(conf.domain, func(it LinkDomain) bool {
+	search := common.Filter(common.Map(common.Filter(conf.domain, func(it LinkDomain) bool {
 		return !it.RoutingOnly
 	}), func(it LinkDomain) string {
-		return it.Domain
+		return mDNS.Fqdn(it.Domain)
+	}), func(it string) bool {
+		return it != "."
 	})
 
 	l := len(name)

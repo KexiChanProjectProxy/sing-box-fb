@@ -26,7 +26,6 @@ import (
 	"github.com/sagernet/sing-box/internal/paneladapter/traffic"
 	"github.com/sagernet/sing-box/log"
 	E "github.com/sagernet/sing/common/exceptions"
-	"github.com/sagernet/sing/common/logger"
 )
 
 // ---------------------------------------------------------------------------
@@ -91,7 +90,7 @@ func NewReporter(c *client.Client, store *state.Store, tracker *traffic.Tracker,
 		tracker:   tracker,
 		nodeID:    nodeID,
 		skipEmpty: true,
-		logger:    logger.NOP(),
+		logger:    log.NewNOPFactory().Logger(),
 	}
 	r.reportStartTime = time.Now().UTC()
 	for _, opt := range opts {

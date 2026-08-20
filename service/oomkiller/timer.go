@@ -99,13 +99,12 @@ func buildTimerConfig(options option.OOMKillerServiceOptions, memoryLimit uint64
 
 type adaptiveTimer struct {
 	timerConfig
-	logger          log.ContextLogger
+	logger          log.StructuredLogger
 	network         adapter.NetworkManager
 	onTriggered     func(uint64)
 	limitThresholds pressureThresholds
 
 	access                  sync.Mutex
-	cleanupTriggered        bool
 	timer                   *time.Timer
 	state                   pressureState
 	currentInterval         time.Duration
@@ -115,7 +114,7 @@ type adaptiveTimer struct {
 	pressureBaselineTime    time.Time
 }
 
-func newAdaptiveTimer(logger log.ContextLogger, network adapter.NetworkManager, config timerConfig, onTriggered func(uint64)) *adaptiveTimer {
+func newAdaptiveTimer(logger log.StructuredLogger, network adapter.NetworkManager, config timerConfig, onTriggered func(uint64)) *adaptiveTimer {
 	t := &adaptiveTimer{
 		timerConfig: config,
 		logger:      logger,
@@ -162,12 +161,6 @@ func (t *adaptiveTimer) poll() {
 		t.access.Unlock()
 		return
 	}
-	if t.timerConfig.policyMode == policyModeNetworkExtension {
-		if t.cleanupTriggered {
-			runtimeDebug.FreeOSMemory()
-			t.cleanupTriggered = true
-		}
-	}
 	if t.pendingPressureBaseline {
 		t.pressureBaseline = sample
 		t.pressureBaselineTime = time.Now()
@@ -190,8 +183,8 @@ func (t *adaptiveTimer) poll() {
 			growth := sample.usage - t.pressureBaseline.usage
 			ratePerSecond := float64(growth) / elapsed.Seconds()
 			headroom := t.memoryLimit - sample.usage
-			timeToLimit := time.Duration(float64(headroom)/ratePerSecond) * time.Second
-			if timeToLimit < t.minInterval {
+			secondsUntilLimit := float64(headroom) / ratePerSecond
+			if secondsUntilLimit < t.minInterval.Seconds() {
 				triggered = true
 				rateTriggered = true
 				t.state = pressureStateTriggered
@@ -202,20 +195,21 @@ func (t *adaptiveTimer) poll() {
 	if !triggered {
 		return
 	}
-	t.cleanupTriggered = false
-	t.onTriggered(sample.usage)
+	if t.onTriggered != nil {
+		t.onTriggered(sample.usage)
+	}
 	if rateTriggered {
 		if t.killerDisabled {
-			t.logger.Warn("memory growth rate critical (report only), usage: ", byteformats.FormatMemoryBytes(sample.usage), t.logDetails(sample))
+			t.logger.WarnEvent("oom.rate.critical", "memory growth rate critical", log.Uint64("usage", sample.usage), log.String("detail", t.logDetails(sample)), log.Bool("report_only", true))
 		} else {
-			t.logger.Error("memory growth rate critical, usage: ", byteformats.FormatMemoryBytes(sample.usage), t.logDetails(sample), ", resetting network")
+			t.logger.ErrorEvent("oom.rate.critical", "memory growth rate critical", log.Uint64("usage", sample.usage), log.String("detail", t.logDetails(sample)))
 			t.network.ResetNetwork()
 		}
 	} else {
 		if t.killerDisabled {
-			t.logger.Warn("memory threshold reached (report only), usage: ", byteformats.FormatMemoryBytes(sample.usage), t.logDetails(sample))
+			t.logger.WarnEvent("oom.threshold", "memory threshold reached", log.Uint64("usage", sample.usage), log.String("detail", t.logDetails(sample)), log.Bool("report_only", true))
 		} else {
-			t.logger.Error("memory threshold reached, usage: ", byteformats.FormatMemoryBytes(sample.usage), t.logDetails(sample), ", resetting network")
+			t.logger.ErrorEvent("oom.threshold", "memory threshold reached", log.Uint64("usage", sample.usage), log.String("detail", t.logDetails(sample)))
 			t.network.ResetNetwork()
 		}
 	}

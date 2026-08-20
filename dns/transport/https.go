@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/sagernet/sing-box/adapter"
@@ -22,7 +23,6 @@ import (
 	"github.com/sagernet/sing/common"
 	"github.com/sagernet/sing/common/buf"
 	E "github.com/sagernet/sing/common/exceptions"
-	"github.com/sagernet/sing/common/logger"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
 	sHTTP "github.com/sagernet/sing/protocol/http"
@@ -41,16 +41,18 @@ func RegisterHTTPS(registry *dns.TransportRegistry) {
 
 type HTTPSTransport struct {
 	dns.TransportAdapter
-	logger           logger.ContextLogger
+	logger           log.StructuredLogger
 	dialer           N.Dialer
 	destination      *url.URL
 	headers          http.Header
+	serverAddr       M.Socksaddr
+	fallback         *atomic.Bool
 	transportAccess  sync.Mutex
 	transport        *HTTPSTransportWrapper
 	transportResetAt time.Time
 }
 
-func NewHTTPS(ctx context.Context, logger log.ContextLogger, tag string, options option.RemoteHTTPSDNSServerOptions) (adapter.DNSTransport, error) {
+func NewHTTPS(ctx context.Context, logger log.StructuredLogger, tag string, options option.RemoteHTTPSDNSServerOptions) (adapter.DNSTransport, error) {
 	transportDialer, err := dns.NewRemoteDialer(ctx, options.RemoteDNSServerOptions)
 	if err != nil {
 		return nil, err
@@ -113,7 +115,7 @@ func NewHTTPS(ctx context.Context, logger log.ContextLogger, tag string, options
 
 func NewHTTPSRaw(
 	adapter dns.TransportAdapter,
-	logger log.ContextLogger,
+	logger log.StructuredLogger,
 	dialer N.Dialer,
 	destination *url.URL,
 	headers http.Header,
@@ -123,13 +125,20 @@ func NewHTTPSRaw(
 	if tlsConfig != nil {
 		dialer = tls.NewDialer(dialer, tlsConfig)
 	}
+	fallback := new(atomic.Bool)
+	if destination.Scheme == "http" {
+		// plain HTTP DoH used by Tailscale
+		fallback.Store(true)
+	}
 	return &HTTPSTransport{
 		TransportAdapter: adapter,
 		logger:           logger,
 		dialer:           dialer,
 		destination:      destination,
 		headers:          headers,
-		transport:        NewHTTPSTransportWrapper(dialer, serverAddr, destination),
+		serverAddr:       serverAddr,
+		fallback:         fallback,
+		transport:        NewHTTPSTransportWrapper(dialer, serverAddr, fallback),
 	}
 }
 
@@ -148,8 +157,14 @@ func (t *HTTPSTransport) Close() error {
 func (t *HTTPSTransport) Reset() {
 	t.transportAccess.Lock()
 	defer t.transportAccess.Unlock()
-	t.transport.CloseIdleConnections()
-	t.transport = t.transport.Clone()
+	t.resetTransportLocked()
+}
+
+func (t *HTTPSTransport) resetTransportLocked() {
+	oldTransport := t.transport
+	t.transport = NewHTTPSTransportWrapper(t.dialer, t.serverAddr, t.fallback)
+	t.transportResetAt = time.Now()
+	oldTransport.Close()
 }
 
 func (t *HTTPSTransport) Exchange(ctx context.Context, message *mDNS.Msg) (*mDNS.Msg, error) {
@@ -162,13 +177,17 @@ func (t *HTTPSTransport) Exchange(ctx context.Context, message *mDNS.Msg) (*mDNS
 			if t.transportResetAt.After(startAt) {
 				return nil, err
 			}
-			t.transport.CloseIdleConnections()
-			t.transport = t.transport.Clone()
-			t.transportResetAt = time.Now()
+			t.resetTransportLocked()
 		}
 		return nil, err
 	}
 	return response, nil
+}
+
+func (t *HTTPSTransport) ExchangeAsync(ctx context.Context, message *mDNS.Msg, callback func(response *mDNS.Msg, err error)) {
+	go func() {
+		callback(t.Exchange(ctx, message))
+	}()
 }
 
 func (t *HTTPSTransport) exchange(ctx context.Context, message *mDNS.Msg) (*mDNS.Msg, error) {

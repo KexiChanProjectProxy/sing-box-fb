@@ -7,16 +7,16 @@ import (
 	"net"
 	"os"
 
+	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/quic-go"
 	"github.com/sagernet/quic-go/http3"
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/common/tls"
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/option"
-	"github.com/sagernet/sing-quic"
+	qtls "github.com/sagernet/sing-quic"
 	"github.com/sagernet/sing/common"
 	E "github.com/sagernet/sing/common/exceptions"
-	"github.com/sagernet/sing/common/logger"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
 )
@@ -25,7 +25,7 @@ var _ adapter.V2RayServerTransport = (*Server)(nil)
 
 type Server struct {
 	ctx          context.Context
-	logger       logger.ContextLogger
+	logger       log.StructuredLogger
 	tlsConfig    tls.ServerConfig
 	quicConfig   *quic.Config
 	handler      adapter.V2RayServerTransportHandler
@@ -33,7 +33,7 @@ type Server struct {
 	quicListener qtls.Listener
 }
 
-func NewServer(ctx context.Context, logger logger.ContextLogger, options option.V2RayQUICOptions, tlsConfig tls.ServerConfig, handler adapter.V2RayServerTransportHandler) (adapter.V2RayServerTransport, error) {
+func NewServer(ctx context.Context, logger log.StructuredLogger, options option.V2RayQUICOptions, tlsConfig tls.ServerConfig, handler adapter.V2RayServerTransportHandler) (adapter.V2RayServerTransport, error) {
 	quicConfig := &quic.Config{
 		DisablePathMTUDiscovery: !C.IsLinux && !C.IsWindows,
 	}
@@ -78,7 +78,8 @@ func (s *Server) acceptLoop() {
 		go func() {
 			hErr := s.streamAcceptLoop(conn)
 			if hErr != nil && !E.IsClosedOrCanceled(hErr) {
-				s.logger.ErrorContext(conn.Context(), hErr)
+				s.logger.ErrorEventContext(conn.Context(), "connection.error", "process connection", log.Err(hErr))
+
 			}
 		}()
 	}

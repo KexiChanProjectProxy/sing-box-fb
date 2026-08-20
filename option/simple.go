@@ -22,7 +22,7 @@ type HTTPMixedInboundOptions struct {
 type SOCKSOutboundOptions struct {
 	DialerOptions
 	ServerOptions
-	Version    string             `json:"version,omitempty"`
+	Version    string             `json:"version,omitempty" enum:"4,4a,5"`
 	Username   string             `json:"username,omitempty"`
 	Password   string             `json:"password,omitempty"`
 	Network    NetworkList        `json:"network,omitempty"`
@@ -34,6 +34,17 @@ type HTTPOutboundOptions struct {
 	ServerOptions
 	Username string `json:"username,omitempty"`
 	Password string `json:"password,omitempty"`
+	OutboundTLSOptionsContainer
+	Path    string               `json:"path,omitempty"`
+	Headers badoption.HTTPHeader `json:"headers,omitempty"`
+}
+
+// HTTPDynamicOutboundOptions configures an HTTP CONNECT proxy whose password
+// is derived from the authenticated inbound user and the client's source IP.
+type HTTPDynamicOutboundOptions struct {
+	DialerOptions
+	ServerOptions
+	Username string `json:"username,omitempty"`
 	OutboundTLSOptionsContainer
 	Path    string               `json:"path,omitempty"`
 	Headers badoption.HTTPHeader `json:"headers,omitempty"`

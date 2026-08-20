@@ -6,6 +6,7 @@ import (
 	"os"
 	"time"
 
+
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/adapter/inbound"
 	"github.com/sagernet/sing-box/common/listener"
@@ -16,7 +17,7 @@ import (
 	"github.com/sagernet/sing/common/bufio"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
-	"github.com/sagernet/sing/common/udpnat2"
+	udpnat "github.com/sagernet/sing/common/udpnat2"
 )
 
 func RegisterInbound(registry *inbound.Registry) {
@@ -27,14 +28,14 @@ type Inbound struct {
 	inbound.Adapter
 	ctx                 context.Context
 	router              adapter.ConnectionRouterEx
-	logger              log.ContextLogger
+	logger              log.StructuredLogger
 	listener            *listener.Listener
 	udpNat              *udpnat.Service
 	overrideOption      int
 	overrideDestination M.Socksaddr
 }
 
-func NewInbound(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.DirectInboundOptions) (adapter.Inbound, error) {
+func NewInbound(ctx context.Context, router adapter.Router, logger log.StructuredLogger, tag string, options option.DirectInboundOptions) (adapter.Inbound, error) {
 	options.UDPFragmentDefault = true
 	inbound := &Inbound{
 		Adapter: inbound.NewAdapter(C.TypeDirect, tag),
@@ -77,6 +78,10 @@ func (i *Inbound) Start(stage adapter.StartStage) error {
 	return i.listener.Start()
 }
 
+func (i *Inbound) InterfaceUpdated() {
+	i.udpNat.Purge()
+}
+
 func (i *Inbound) Close() error {
 	return i.listener.Close()
 }
@@ -102,14 +107,11 @@ func (i *Inbound) NewConnection(ctx context.Context, conn net.Conn, metadata ada
 		destination.Port = i.overrideDestination.Port
 	}
 	metadata.Destination = destination
-	if i.overrideOption != 0 {
-		i.logger.InfoContext(ctx, "inbound connection to ", metadata.Destination)
-	}
+	adapter.LogInboundConnection(i.logger, ctx, metadata)
 	i.router.RouteConnectionEx(ctx, conn, metadata, onClose)
 }
 
 func (i *Inbound) NewPacketConnectionEx(ctx context.Context, conn N.PacketConn, source M.Socksaddr, destination M.Socksaddr, onClose N.CloseHandlerFunc) {
-	i.logger.InfoContext(ctx, "inbound packet connection from ", source)
 	var metadata adapter.InboundContext
 	metadata.Inbound = i.Tag()
 	metadata.InboundType = i.Type()
@@ -127,8 +129,8 @@ func (i *Inbound) NewPacketConnectionEx(ctx context.Context, conn N.PacketConn, 
 		destination.Port = i.overrideDestination.Port
 	default:
 	}
-	i.logger.InfoContext(ctx, "inbound packet connection to ", destination)
 	metadata.Destination = destination
+	adapter.LogInboundPacket(i.logger, ctx, metadata)
 	if i.overrideOption != 0 {
 		conn = bufio.NewDestinationNATPacketConn(bufio.NewNetPacketConn(conn), i.listener.UDPAddr(), destination)
 	}

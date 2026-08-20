@@ -10,8 +10,7 @@ import (
 	"github.com/sagernet/sing-box/internal/paneladapter/client"
 	"github.com/sagernet/sing-box/internal/paneladapter/contract"
 	"github.com/sagernet/sing-box/internal/paneladapter/state"
-
-	"github.com/sagernet/sing/common/logger"
+	"github.com/sagernet/sing-box/log"
 )
 
 // ---------------------------------------------------------------------------
@@ -60,7 +59,7 @@ func newTestPoller() (*Poller, *mockFetcher, *mockReplacer, *state.Store) {
 	fetcher := &mockFetcher{}
 	replacer := &mockReplacer{}
 
-	p := NewPoller(fetcher, s, replacer, logger.NOP())
+	p := NewPoller(fetcher, s, replacer, log.NewNOPFactory().Logger())
 	return p, fetcher, replacer, s
 }
 
@@ -177,7 +176,7 @@ func TestPollInbound_200_PersistsAppliedUserState(t *testing.T) {
 		etag: "etag-v1",
 	}
 	replacer := &mockReplacer{}
-	poller := NewPoller(fetcher, store, replacer, logger.NOP())
+	poller := NewPoller(fetcher, store, replacer, log.NewNOPFactory().Logger())
 
 	if err := poller.PollInbound(
 		context.Background(),

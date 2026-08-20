@@ -1,125 +1,172 @@
 package hysteria2
 
 import (
-	"sync"
+	"crypto/tls"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
 	"testing"
 
-	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing-box/option"
 	"github.com/stretchr/testify/require"
 )
 
-func TestReplaceUsersBasic(t *testing.T) {
-	h := &Inbound{
-		userNameList: []string{"static-user"},
-	}
+func TestMasqueradeProxyHTTPS(t *testing.T) {
+	t.Parallel()
 
-	users := []adapter.ManagedUser{
-		{UserID: "u1", Name: "alice", Credential: adapter.ManagedUserCredential{Password: "pass1"}},
-		{UserID: "u2", Name: "bob", Credential: adapter.ManagedUserCredential{Password: "pass2"}},
-	}
-
-	err := h.ReplaceUsers(users)
-	require.NoError(t, err)
-
-	h.userLock.RLock()
-	ids := h.userIDList
-	names := h.userNameList
-	h.userLock.RUnlock()
-
-	require.Equal(t, []string{"u1", "u2"}, ids)
-	require.Len(t, names, 2)
-	require.Equal(t, "alice", names[0])
-	require.Equal(t, "bob", names[1])
-}
-
-func TestReplaceUsersEmptyRemovesAll(t *testing.T) {
-	h := &Inbound{
-		userNameList: []string{"static-user"},
-	}
-
-	err := h.ReplaceUsers([]adapter.ManagedUser{})
-	require.NoError(t, err)
-
-	h.userLock.RLock()
-	ids := h.userIDList
-	names := h.userNameList
-	h.userLock.RUnlock()
-
-	require.Len(t, ids, 0)
-	require.Len(t, names, 0)
-}
-
-func TestReplaceUsersUserIDAsNameFallback(t *testing.T) {
-	h := &Inbound{}
-
-	users := []adapter.ManagedUser{
-		{UserID: "user-123", Name: "", Credential: adapter.ManagedUserCredential{Password: "pass"}},
-	}
-
-	err := h.ReplaceUsers(users)
-	require.NoError(t, err)
-
-	h.userLock.RLock()
-	ids := h.userIDList
-	names := h.userNameList
-	h.userLock.RUnlock()
-
-	require.Equal(t, []string{"user-123"}, ids)
-	require.Len(t, names, 1)
-	require.Equal(t, "user-123", names[0]) // UserID used when Name is empty
-}
-
-func TestReplaceUsersAuthoritativeSnapshot(t *testing.T) {
-	h := &Inbound{}
-
-	// First replacement
-	err := h.ReplaceUsers([]adapter.ManagedUser{
-		{UserID: "u1", Name: "alice", Credential: adapter.ManagedUserCredential{Password: "p1"}},
-		{UserID: "u2", Name: "bob", Credential: adapter.ManagedUserCredential{Password: "p2"}},
-		{UserID: "u3", Name: "charlie", Credential: adapter.ManagedUserCredential{Password: "p3"}},
+	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("proxied"))
+	}))
+	client := upstream.Client()
+	t.Cleanup(func() {
+		client.CloseIdleConnections()
+		upstream.Close()
 	})
-	require.NoError(t, err)
 
-	// Second replacement — authoritative snapshot, u2 and u3 are absent
-	err = h.ReplaceUsers([]adapter.ManagedUser{
-		{UserID: "u1", Name: "alice-updated", Credential: adapter.ManagedUserCredential{Password: "p1-new"}},
+	proxy := newTestMasqueradeProxy(t, upstream.URL, option.Hysteria2MasqueradeProxy{})
+	require.Nil(t, proxy.Transport)
+	proxy.Transport = client.Transport
+
+	request := httptest.NewRequest(http.MethodGet, "https://requested.example/masquerade", nil)
+	request.Host = "requested.example"
+	request.RemoteAddr = "198.51.100.7:4242"
+	request.TLS = &tls.ConnectionState{}
+	response := httptest.NewRecorder()
+
+	proxy.ServeHTTP(response, request)
+
+	require.Equal(t, http.StatusOK, response.Code)
+	require.Equal(t, "proxied", response.Body.String())
+}
+
+func TestMasqueradeProxyXForwardedHeaders(t *testing.T) {
+	t.Parallel()
+
+	var observedHost string
+	var observedHeaders http.Header
+	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		observedHost = r.Host
+		observedHeaders = r.Header.Clone()
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	client := upstream.Client()
+	t.Cleanup(func() {
+		client.CloseIdleConnections()
+		upstream.Close()
 	})
+
+	proxy := newTestMasqueradeProxy(t, upstream.URL, option.Hysteria2MasqueradeProxy{
+		XForwarded: true,
+	})
+	proxy.Transport = client.Transport
+
+	request := httptest.NewRequest(http.MethodGet, "https://requested.example/masquerade", nil)
+	request.Host = "requested.example"
+	request.RemoteAddr = "198.51.100.7:4242"
+	request.TLS = &tls.ConnectionState{}
+	response := httptest.NewRecorder()
+
+	proxy.ServeHTTP(response, request)
+
+	require.Equal(t, http.StatusNoContent, response.Code)
+	require.Equal(t, "requested.example", observedHost)
+	require.Equal(t, []string{"198.51.100.7"}, observedHeaders.Values("X-Forwarded-For"))
+	require.Equal(t, []string{"requested.example"}, observedHeaders.Values("X-Forwarded-Host"))
+	require.Equal(t, []string{"https"}, observedHeaders.Values("X-Forwarded-Proto"))
+}
+
+func TestMasqueradeProxyDisablesSpoofedForwardedHeaders(t *testing.T) {
+	t.Parallel()
+
+	var observedHeaders http.Header
+	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		observedHeaders = r.Header.Clone()
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	client := upstream.Client()
+	t.Cleanup(func() {
+		client.CloseIdleConnections()
+		upstream.Close()
+	})
+
+	proxy := newTestMasqueradeProxy(t, upstream.URL, option.Hysteria2MasqueradeProxy{})
+	proxy.Transport = client.Transport
+
+	request := httptest.NewRequest(http.MethodGet, "https://requested.example/masquerade", nil)
+	request.Host = "requested.example"
+	request.Header.Set("X-Forwarded-For", "203.0.113.77")
+	request.Header.Set("X-Forwarded-Host", "spoofed.example")
+	request.Header.Set("X-Forwarded-Proto", "http")
+	response := httptest.NewRecorder()
+
+	proxy.ServeHTTP(response, request)
+
+	require.Equal(t, http.StatusNoContent, response.Code)
+	require.Empty(t, observedHeaders.Values("X-Forwarded-For"))
+	require.Empty(t, observedHeaders.Values("X-Forwarded-Host"))
+	require.Empty(t, observedHeaders.Values("X-Forwarded-Proto"))
+}
+
+func TestMasqueradeProxyRewriteHostIndependentOfForwardedHost(t *testing.T) {
+	t.Parallel()
+
+	var observedHost string
+	var observedForwardedHost []string
+	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		observedHost = r.Host
+		observedForwardedHost = r.Header.Values("X-Forwarded-Host")
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	client := upstream.Client()
+	t.Cleanup(func() {
+		client.CloseIdleConnections()
+		upstream.Close()
+	})
+
+	proxy := newTestMasqueradeProxy(t, upstream.URL, option.Hysteria2MasqueradeProxy{
+		RewriteHost: true,
+		XForwarded:  true,
+	})
+	proxy.Transport = client.Transport
+
+	request := httptest.NewRequest(http.MethodGet, "https://requested.example/masquerade", nil)
+	request.Host = "requested.example"
+	request.RemoteAddr = "198.51.100.7:4242"
+	request.TLS = &tls.ConnectionState{}
+	response := httptest.NewRecorder()
+
+	proxy.ServeHTTP(response, request)
+
+	target, err := url.Parse(upstream.URL)
 	require.NoError(t, err)
-
-	h.userLock.RLock()
-	ids := h.userIDList
-	names := h.userNameList
-	h.userLock.RUnlock()
-
-	require.Equal(t, []string{"u1"}, ids)
-	require.Len(t, names, 1)
-	require.Equal(t, "alice-updated", names[0])
+	require.Equal(t, http.StatusNoContent, response.Code)
+	require.Equal(t, target.Host, observedHost)
+	require.Equal(t, []string{"requested.example"}, observedForwardedHost)
 }
 
-func TestReplaceUsersConcurrent(t *testing.T) {
-	h := &Inbound{}
+func TestMasqueradeProxyClosedUpstreamReturns502(t *testing.T) {
+	t.Parallel()
 
-	var wg sync.WaitGroup
-	for i := 0; i < 100; i++ {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			users := []adapter.ManagedUser{
-				{UserID: "u1", Name: "alice", Credential: adapter.ManagedUserCredential{Password: "pass"}},
-			}
-			_ = h.ReplaceUsers(users)
-		}(i)
-	}
-	wg.Wait()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	closedAddress := listener.Addr().String()
+	require.NoError(t, listener.Close())
 
-	// Just verify no data race occurred — the -race detector will catch it
-	h.userLock.RLock()
-	_ = h.userNameList
-	h.userLock.RUnlock()
+	proxy := newTestMasqueradeProxy(t, "https://"+closedAddress, option.Hysteria2MasqueradeProxy{})
+
+	request := httptest.NewRequest(http.MethodGet, "https://requested.example/masquerade", nil)
+	response := httptest.NewRecorder()
+
+	proxy.ServeHTTP(response, request)
+
+	require.Equal(t, http.StatusBadGateway, response.Code)
 }
 
-func TestInboundImplementsManagedUserInbound(t *testing.T) {
-	// Compile-time check already exists as var _ adapter.ManagedUserInbound = (*Inbound)(nil)
-	// This test confirms the interface is satisfied at runtime too.
-	var _ adapter.ManagedUserInbound = (*Inbound)(nil)
+func newTestMasqueradeProxy(t *testing.T, target string, options option.Hysteria2MasqueradeProxy) *httputil.ReverseProxy {
+	t.Helper()
+	targetURL, err := url.Parse(target)
+	require.NoError(t, err)
+	return newMasqueradeProxy(targetURL, options)
 }

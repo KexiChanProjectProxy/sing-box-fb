@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 
+
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/adapter/inbound"
 	"github.com/sagernet/sing-box/common/listener"
@@ -19,18 +20,17 @@ import (
 	"github.com/sagernet/sing/common"
 	"github.com/sagernet/sing/common/auth"
 	E "github.com/sagernet/sing/common/exceptions"
-	"github.com/sagernet/sing/common/logger"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
 	aTLS "github.com/sagernet/sing/common/tls"
 	sHttp "github.com/sagernet/sing/protocol/http"
 
 	"golang.org/x/net/http2"
-	"golang.org/x/net/http2/h2c"
+	"golang.org/x/net/http2/h2c" //nolint:staticcheck
 )
 
 var (
-	ConfigureHTTP3ListenerFunc func(ctx context.Context, logger logger.Logger, listener *listener.Listener, handler http.Handler, tlsConfig tls.ServerConfig, options option.NaiveInboundOptions) (io.Closer, error)
+	ConfigureHTTP3ListenerFunc func(ctx context.Context, logger log.StructuredLogger, listener *listener.Listener, handler http.Handler, tlsConfig tls.ServerConfig, options option.NaiveInboundOptions) (io.Closer, error)
 	WrapError                  func(error) error
 )
 
@@ -42,7 +42,7 @@ type Inbound struct {
 	inbound.Adapter
 	ctx              context.Context
 	router           adapter.ConnectionRouterEx
-	logger           logger.ContextLogger
+	logger           log.StructuredLogger
 	options          option.NaiveInboundOptions
 	listener         *listener.Listener
 	network          []string
@@ -53,7 +53,7 @@ type Inbound struct {
 	h3Server         io.Closer
 }
 
-func NewInbound(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.NaiveInboundOptions) (adapter.Inbound, error) {
+func NewInbound(ctx context.Context, router adapter.Router, logger log.StructuredLogger, tag string, options option.NaiveInboundOptions) (adapter.Inbound, error) {
 	inbound := &Inbound{
 		Adapter: inbound.NewAdapter(C.TypeNaive, tag),
 		ctx:     ctx,
@@ -102,24 +102,25 @@ func (n *Inbound) Start(stage adapter.StartStage) error {
 			return err
 		}
 		n.httpServer = &http.Server{
+			//nolint:staticcheck
 			Handler: h2c.NewHandler(n, &http2.Server{}),
 			BaseContext: func(listener net.Listener) context.Context {
 				return n.ctx
 			},
 		}
-		go func() {
-			listener := net.Listener(tcpListener)
-			if n.tlsConfig != nil {
-				if len(n.tlsConfig.NextProtos()) == 0 {
-					n.tlsConfig.SetNextProtos([]string{http2.NextProtoTLS, "http/1.1"})
-				} else if !common.Contains(n.tlsConfig.NextProtos(), http2.NextProtoTLS) {
-					n.tlsConfig.SetNextProtos(append([]string{http2.NextProtoTLS}, n.tlsConfig.NextProtos()...))
-				}
-				listener = aTLS.NewListener(tcpListener, n.tlsConfig)
+		listener := net.Listener(tcpListener)
+		if n.tlsConfig != nil {
+			if len(n.tlsConfig.NextProtos()) == 0 {
+				n.tlsConfig.SetNextProtos([]string{http2.NextProtoTLS, "http/1.1"})
+			} else if !common.Contains(n.tlsConfig.NextProtos(), http2.NextProtoTLS) {
+				n.tlsConfig.SetNextProtos(append([]string{http2.NextProtoTLS}, n.tlsConfig.NextProtos()...))
 			}
+			listener = aTLS.NewListener(tcpListener, n.tlsConfig)
+		}
+		go func() {
 			sErr := n.httpServer.Serve(listener)
 			if sErr != nil && !errors.Is(sErr, http.ErrServerClosed) {
-				n.logger.Error("http server serve error: ", sErr)
+				n.logger.ErrorEvent("listener.error", "listener error", log.Err(sErr))
 			}
 		}()
 	}
@@ -129,7 +130,8 @@ func (n *Inbound) Start(stage adapter.StartStage) error {
 		if err == nil {
 			n.h3Server = http3Server
 		} else if len(n.network) > 1 {
-			n.logger.Warn(E.Cause(err, "naive http3 disabled"))
+			n.logger.WarnEvent("listener.error", "listener error", log.Err(err), log.String("reason", "naive http3 disabled"))
+
 		} else {
 			return err
 		}
@@ -199,13 +201,6 @@ func (n *Inbound) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 }
 
 func (n *Inbound) newConnection(ctx context.Context, waitForClose bool, conn net.Conn, userName string, source M.Socksaddr, destination M.Socksaddr) {
-	if userName != "" {
-		n.logger.InfoContext(ctx, "[", userName, "] inbound connection from ", source)
-		n.logger.InfoContext(ctx, "[", userName, "] inbound connection to ", destination)
-	} else {
-		n.logger.InfoContext(ctx, "inbound connection from ", source)
-		n.logger.InfoContext(ctx, "inbound connection to ", destination)
-	}
 	var metadata adapter.InboundContext
 	metadata.Inbound = n.Tag()
 	metadata.InboundType = n.Type()
@@ -216,12 +211,13 @@ func (n *Inbound) newConnection(ctx context.Context, waitForClose bool, conn net
 	metadata.Destination = destination
 	metadata.OriginDestination = M.SocksaddrFromNet(conn.LocalAddr()).Unwrap()
 	metadata.User = userName
+	adapter.LogInboundConnection(n.logger, ctx, metadata)
 	if !waitForClose {
 		n.router.RouteConnectionEx(ctx, conn, metadata, nil)
 	} else {
 		done := make(chan struct{})
 		wrapper := v2rayhttp.NewHTTP2Wrapper(conn)
-		n.router.RouteConnectionEx(ctx, conn, metadata, N.OnceClose(func(it error) {
+		n.router.RouteConnectionEx(ctx, wrapper, metadata, N.OnceClose(func(it error) {
 			close(done)
 		}))
 		<-done
@@ -230,7 +226,8 @@ func (n *Inbound) newConnection(ctx context.Context, waitForClose bool, conn net
 }
 
 func (n *Inbound) badRequest(ctx context.Context, request *http.Request, err error) {
-	n.logger.ErrorContext(ctx, E.Cause(err, "process connection from ", request.RemoteAddr))
+	adapter.LogConnectionError(n.logger, ctx, err, M.ParseSocksaddr(request.RemoteAddr))
+
 }
 
 func rejectHTTP(writer http.ResponseWriter, statusCode int) {

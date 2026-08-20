@@ -17,7 +17,7 @@ import (
 var _ Searcher = (*linuxSearcher)(nil)
 
 type linuxSearcher struct {
-	logger           log.ContextLogger
+	logger           log.StructuredLogger
 	diagConns        [4]*socketDiagConn
 	processPathCache *uidProcessPathCache
 }
@@ -33,6 +33,10 @@ func NewSearcher(config Config) (Searcher, error) {
 		}
 	}
 	return searcher, nil
+}
+
+func (s *linuxSearcher) ResetCache() {
+	s.processPathCache.cache.Purge()
 }
 
 func (s *linuxSearcher) Close() error {
@@ -56,7 +60,8 @@ func (s *linuxSearcher) FindProcessInfo(ctx context.Context, network string, sou
 	}
 	processPath, err := s.processPathCache.findProcessPath(inode, uid)
 	if err != nil {
-		s.logger.DebugContext(ctx, "find process path: ", err)
+		s.logger.DebugEventContext(ctx, "process.lookup.error", "find process path", log.Err(err))
+
 	} else {
 		processInfo.ProcessPath = processPath
 	}

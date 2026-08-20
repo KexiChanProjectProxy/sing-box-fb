@@ -7,7 +7,6 @@ import (
 
 	"github.com/sagernet/sing-box/log"
 	E "github.com/sagernet/sing/common/exceptions"
-	F "github.com/sagernet/sing/common/format"
 )
 
 type SimpleLifecycle interface {
@@ -74,10 +73,10 @@ func getServiceName(service any) string {
 	return strings.ToLower(t.Name())
 }
 
-func Start(logger log.ContextLogger, stage StartStage, services ...Lifecycle) error {
+func Start(logger log.StructuredLogger, stage StartStage, services ...Lifecycle) error {
 	for _, service := range services {
 		name := getServiceName(service)
-		done := LogElapsed(logger, stage, " ", name)
+		done := LogElapsed(logger, stage.String()+" "+name)
 		err := service.Start(stage)
 		done()
 		if err != nil {
@@ -87,9 +86,9 @@ func Start(logger log.ContextLogger, stage StartStage, services ...Lifecycle) er
 	return nil
 }
 
-func StartNamed(logger log.ContextLogger, stage StartStage, services []LifecycleService) error {
+func StartNamed(logger log.StructuredLogger, stage StartStage, services []LifecycleService) error {
 	for _, service := range services {
-		done := LogElapsed(logger, stage, " ", service.Name())
+		done := LogElapsed(logger, stage.String()+" "+service.Name())
 		err := service.Start(stage)
 		done()
 		if err != nil {
@@ -99,16 +98,15 @@ func StartNamed(logger log.ContextLogger, stage StartStage, services []Lifecycle
 	return nil
 }
 
-func LogElapsed(logger log.ContextLogger, description ...any) func() {
-	prefix := F.ToString(description...)
+func LogElapsed(logger log.StructuredLogger, name string) func() {
 	startTime := time.Now()
 	timer := time.AfterFunc(time.Second, func() {
-		logger.Trace(prefix, "...")
+		logger.TraceEvent("lifecycle.slow", "still running", log.String("name", name))
 	})
 	return func() {
 		if timer.Stop() {
 			return
 		}
-		logger.Trace(prefix, " completed (", F.Seconds(time.Since(startTime).Seconds()), "s)")
+		logger.TraceEvent("lifecycle.completed", "completed", log.String("name", name), log.Duration("elapsed", time.Since(startTime)))
 	}
 }

@@ -4,17 +4,18 @@ import (
 	"context"
 	"time"
 
+	"github.com/sagernet/sing-box/log"
+
 	"github.com/sagernet/sing-box/common/dialer"
 	"github.com/sagernet/sing-box/common/tls"
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing/common"
 	E "github.com/sagernet/sing/common/exceptions"
-	"github.com/sagernet/sing/common/logger"
 	N "github.com/sagernet/sing/common/network"
 )
 
-func NewTransport(ctx context.Context, logger logger.ContextLogger, tag string, options option.HTTPClientOptions) (*ManagedTransport, error) {
+func NewTransport(ctx context.Context, logger log.StructuredLogger, tag string, options option.HTTPClientOptions) (*ManagedTransport, error) {
 	rawDialer, err := dialer.NewWithOptions(dialer.Options{
 		Context:                 ctx,
 		Options:                 options.DialerOptions,
@@ -35,11 +36,11 @@ func NewTransport(ctx context.Context, logger logger.ContextLogger, tag string, 
 	var cheapRebuild bool
 	switch options.Engine {
 	case C.TLSEngineApple:
-		inner, transportErr := newAppleTransport(ctx, logger, rawDialer, options)
-		if transportErr != nil {
-			return nil, transportErr
+		err = validateAppleTransport(ctx, options)
+		if err != nil {
+			return nil, err
 		}
-		managedTransport := &ManagedTransport{
+		return &ManagedTransport{
 			dialer:  rawDialer,
 			headers: headers,
 			host:    host,
@@ -47,9 +48,7 @@ func NewTransport(ctx context.Context, logger logger.ContextLogger, tag string, 
 			factory: func() (innerTransport, error) {
 				return newAppleTransport(ctx, logger, rawDialer, options)
 			},
-		}
-		managedTransport.epoch.Store(&transportEpoch{transport: inner})
-		return managedTransport, nil
+		}, nil
 	case "", C.TLSEngineGo:
 		cheapRebuild = true
 	default:

@@ -24,7 +24,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/render"
 	"golang.org/x/net/http2"
-	"golang.org/x/net/http2/h2c"
+	"golang.org/x/net/http2/h2c" //nolint:staticcheck
 )
 
 func RegisterRealmService(registry *boxService.Registry) {
@@ -35,14 +35,14 @@ type RealmService struct {
 	boxService.Adapter
 	ctx        context.Context
 	cancel     context.CancelFunc
-	logger     log.ContextLogger
+	logger     log.StructuredLogger
 	listener   *listener.Listener
 	tlsConfig  tls.ServerConfig
 	httpServer *http.Server
 	server     *server
 }
 
-func NewRealmService(ctx context.Context, logger log.ContextLogger, tag string, options option.HysteriaRealmServiceOptions) (adapter.Service, error) {
+func NewRealmService(ctx context.Context, logger log.StructuredLogger, tag string, options option.HysteriaRealmServiceOptions) (adapter.Service, error) {
 	if len(options.Users) == 0 {
 		return nil, E.New("missing users")
 	}
@@ -65,7 +65,8 @@ func NewRealmService(ctx context.Context, logger log.ContextLogger, tag string, 
 	chiRouter.Use(middleware.RequestSize(maxRequestBodyBytes))
 	chiRouter.Use(func(handler http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			logger.DebugContext(r.Context(), r.Method, " ", r.RequestURI, " ", sHTTP.SourceAddress(r))
+			logger.DebugEventContext(r.Context(), "hysteria2.realm.request", "realm request", log.Addr("source", sHTTP.SourceAddress(r)), log.String("path", r.RequestURI))
+
 			handler.ServeHTTP(w, r)
 		})
 	})
@@ -98,6 +99,7 @@ func NewRealmService(ctx context.Context, logger log.ContextLogger, tag string, 
 			Listen:  options.ListenOptions,
 		}),
 		httpServer: &http.Server{
+			//nolint:staticcheck
 			Handler: h2c.NewHandler(chiRouter, &http2.Server{
 				IdleTimeout:                  time.Duration(options.IdleTimeout),
 				ReadIdleTimeout:              time.Duration(options.KeepAlivePeriod),
@@ -144,7 +146,8 @@ func (s *RealmService) Start(stage adapter.StartStage) error {
 	go func() {
 		err = s.httpServer.Serve(tcpListener)
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			s.logger.Error("serve error: ", err)
+			s.logger.ErrorEvent("hysteria2.realm.error", "serve error", log.Err(err))
+
 		}
 	}()
 	return nil

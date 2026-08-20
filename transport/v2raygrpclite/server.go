@@ -15,21 +15,20 @@ import (
 	"github.com/sagernet/sing-box/transport/v2rayhttp"
 	"github.com/sagernet/sing/common"
 	E "github.com/sagernet/sing/common/exceptions"
-	"github.com/sagernet/sing/common/logger"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
 	aTLS "github.com/sagernet/sing/common/tls"
 	sHttp "github.com/sagernet/sing/protocol/http"
 
 	"golang.org/x/net/http2"
-	"golang.org/x/net/http2/h2c"
+	"golang.org/x/net/http2/h2c" //nolint:staticcheck
 )
 
 var _ adapter.V2RayServerTransport = (*Server)(nil)
 
 type Server struct {
 	tlsConfig  tls.ServerConfig
-	logger     logger.ContextLogger
+	logger     log.StructuredLogger
 	handler    adapter.V2RayServerTransportHandler
 	httpServer *http.Server
 	h2Server   *http2.Server
@@ -37,7 +36,7 @@ type Server struct {
 	path       string
 }
 
-func NewServer(ctx context.Context, logger logger.ContextLogger, options option.V2RayGRPCOptions, tlsConfig tls.ServerConfig, handler adapter.V2RayServerTransportHandler) (*Server, error) {
+func NewServer(ctx context.Context, logger log.StructuredLogger, options option.V2RayGRPCOptions, tlsConfig tls.ServerConfig, handler adapter.V2RayServerTransportHandler) (*Server, error) {
 	server := &Server{
 		tlsConfig: tlsConfig,
 		logger:    logger,
@@ -56,6 +55,7 @@ func NewServer(ctx context.Context, logger logger.ContextLogger, options option.
 			return log.ContextWithNewID(ctx)
 		},
 	}
+	//nolint:staticcheck
 	server.h2cHandler = h2c.NewHandler(server, server.h2Server)
 	return server, nil
 }
@@ -93,7 +93,8 @@ func (s *Server) invalidRequest(writer http.ResponseWriter, request *http.Reques
 	if statusCode > 0 {
 		writer.WriteHeader(statusCode)
 	}
-	s.logger.ErrorContext(request.Context(), E.Cause(err, "process connection from ", request.RemoteAddr))
+	s.logger.ErrorEventContext(request.Context(), "connection.error", "process connection", log.Err(err), log.String("source", request.RemoteAddr))
+
 }
 
 func (s *Server) Network() []string {

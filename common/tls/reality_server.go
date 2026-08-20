@@ -30,7 +30,7 @@ type RealityServerConfig struct {
 	handshakeTimeout time.Duration
 }
 
-func NewRealityServer(ctx context.Context, logger log.ContextLogger, options option.InboundTLSOptions) (ServerConfig, error) {
+func NewRealityServer(ctx context.Context, logger log.StructuredLogger, options option.InboundTLSOptions) (ServerConfig, error) {
 	var tlsConfig utls.RealityConfig
 
 	if options.CertificateProvider != nil {
@@ -86,7 +86,7 @@ func NewRealityServer(ctx context.Context, logger log.ContextLogger, options opt
 	tlsConfig.SessionTicketsDisabled = true
 	tlsConfig.Log = func(format string, v ...any) {
 		if logger != nil {
-			logger.Trace(fmt.Sprintf(format, v...))
+			logger.TraceEvent("tls.reality.debug", "reality debug", log.String("detail", fmt.Sprintf(format, v...)))
 		}
 	}
 	tlsConfig.Type = N.NetworkTCP

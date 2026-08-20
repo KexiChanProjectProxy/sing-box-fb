@@ -13,15 +13,16 @@ import (
 	"github.com/sagernet/fswatch"
 	"github.com/sagernet/sing-box/adapter"
 	C "github.com/sagernet/sing-box/constant"
+	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
 	E "github.com/sagernet/sing/common/exceptions"
-	"github.com/sagernet/sing/common/logger"
-	"github.com/sagernet/sing/service"
+	"github.com/sagernet/sing/service/filemanager"
 )
 
 var _ adapter.CertificateStore = (*Store)(nil)
 
 type Store struct {
+	ctx                       context.Context
 	access                    sync.RWMutex
 	storeType                 string
 	systemPool                *x509.CertPool
@@ -34,7 +35,7 @@ type Store struct {
 	platform storePlatform
 }
 
-func NewStore(ctx context.Context, logger logger.Logger, options option.CertificateOptions) (*Store, error) {
+func NewStore(ctx context.Context, logger log.StructuredLogger, options option.CertificateOptions) (*Store, error) {
 	storeType := options.Store
 	if storeType == "" {
 		storeType = C.CertificateStoreSystem
@@ -43,14 +44,10 @@ func NewStore(ctx context.Context, logger logger.Logger, options option.Certific
 	switch storeType {
 	case C.CertificateStoreSystem:
 		systemPool = x509.NewCertPool()
-		platformInterface := service.FromContext[adapter.PlatformInterface](ctx)
 		var systemValid bool
-		if platformInterface != nil {
-			for _, cert := range platformInterface.SystemCertificates() {
-				if systemPool.AppendCertsFromPEM([]byte(cert)) {
-					systemValid = true
-				}
-			}
+		for _, certificate := range systemCertificates() {
+			systemPool.AddCert(certificate)
+			systemValid = true
 		}
 		if !systemValid {
 			certPool, err := x509.SystemCertPool()
@@ -65,6 +62,7 @@ func NewStore(ctx context.Context, logger logger.Logger, options option.Certific
 		return nil, E.New("unknown certificate store: ", options.Store)
 	}
 	store := &Store{
+		ctx:                       ctx,
 		storeType:                 storeType,
 		systemPool:                systemPool,
 		certificate:               strings.Join(options.Certificate, "\n"),
@@ -85,7 +83,7 @@ func NewStore(ctx context.Context, logger logger.Logger, options option.Certific
 			Callback: func(_ string) {
 				err := store.update()
 				if err != nil {
-					logger.Error(E.Cause(err, "reload certificates"))
+					logger.ErrorEvent("certificate.reload.error", "reload certificates", log.Err(err))
 				}
 			},
 		})
@@ -171,7 +169,7 @@ func (s *Store) update() error {
 		appendPEMBlock(pemBuffer, s.certificate)
 	}
 	for _, path := range s.certificatePaths {
-		pemContent, err := os.ReadFile(path)
+		pemContent, err := filemanager.ReadFile(s.ctx, path)
 		if err != nil {
 			return err
 		}
@@ -182,7 +180,7 @@ func (s *Store) update() error {
 	}
 	var firstErr error
 	for _, directoryPath := range s.certificateDirectoryPaths {
-		directoryEntries, err := readUniqueDirectoryEntries(directoryPath)
+		directoryEntries, err := readUniqueDirectoryEntries(s.ctx, directoryPath)
 		if err != nil {
 			if firstErr == nil && !os.IsNotExist(err) {
 				firstErr = E.Cause(err, "invalid certificate directory: ", directoryPath)
@@ -190,7 +188,7 @@ func (s *Store) update() error {
 			continue
 		}
 		for _, directoryEntry := range directoryEntries {
-			pemContent, err := os.ReadFile(filepath.Join(directoryPath, directoryEntry.Name()))
+			pemContent, err := filemanager.ReadFile(s.ctx, filepath.Join(directoryPath, directoryEntry.Name()))
 			if err == nil && currentPool.AppendCertsFromPEM(pemContent) {
 				appendPEMBlock(pemBuffer, string(pemContent))
 			}
@@ -229,8 +227,8 @@ func (s *Store) newBasePool() (*x509.CertPool, error) {
 	}
 }
 
-func readUniqueDirectoryEntries(dir string) ([]fs.DirEntry, error) {
-	files, err := os.ReadDir(dir)
+func readUniqueDirectoryEntries(ctx context.Context, dir string) ([]fs.DirEntry, error) {
+	files, err := filemanager.ReadDir(ctx, dir)
 	if err != nil {
 		return nil, err
 	}

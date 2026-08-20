@@ -2,6 +2,8 @@ package certificate
 
 import (
 	"context"
+	"maps"
+	"slices"
 	"sync"
 
 	"github.com/sagernet/sing-box/adapter"
@@ -10,12 +12,12 @@ import (
 	E "github.com/sagernet/sing/common/exceptions"
 )
 
-type ConstructorFunc[T any] func(ctx context.Context, logger log.ContextLogger, tag string, options T) (adapter.CertificateProviderService, error)
+type ConstructorFunc[T any] func(ctx context.Context, logger log.StructuredLogger, tag string, options T) (adapter.CertificateProviderService, error)
 
 func Register[Options any](registry *Registry, providerType string, constructor ConstructorFunc[Options]) {
 	registry.register(providerType, func() any {
 		return new(Options)
-	}, func(ctx context.Context, logger log.ContextLogger, tag string, rawOptions any) (adapter.CertificateProviderService, error) {
+	}, func(ctx context.Context, logger log.StructuredLogger, tag string, rawOptions any) (adapter.CertificateProviderService, error) {
 		var options *Options
 		if rawOptions != nil {
 			options = rawOptions.(*Options)
@@ -28,7 +30,7 @@ var _ adapter.CertificateProviderRegistry = (*Registry)(nil)
 
 type (
 	optionsConstructorFunc func() any
-	constructorFunc        func(ctx context.Context, logger log.ContextLogger, tag string, options any) (adapter.CertificateProviderService, error)
+	constructorFunc        func(ctx context.Context, logger log.StructuredLogger, tag string, options any) (adapter.CertificateProviderService, error)
 )
 
 type Registry struct {
@@ -44,6 +46,12 @@ func NewRegistry() *Registry {
 	}
 }
 
+func (m *Registry) OptionTypes() []string {
+	m.access.Lock()
+	defer m.access.Unlock()
+	return slices.Sorted(maps.Keys(m.optionsType))
+}
+
 func (m *Registry) CreateOptions(providerType string) (any, bool) {
 	m.access.Lock()
 	defer m.access.Unlock()
@@ -54,7 +62,7 @@ func (m *Registry) CreateOptions(providerType string) (any, bool) {
 	return optionsConstructor(), true
 }
 
-func (m *Registry) Create(ctx context.Context, logger log.ContextLogger, tag string, providerType string, options any) (adapter.CertificateProviderService, error) {
+func (m *Registry) Create(ctx context.Context, logger log.StructuredLogger, tag string, providerType string, options any) (adapter.CertificateProviderService, error) {
 	m.access.Lock()
 	defer m.access.Unlock()
 	constructor, loaded := m.constructor[providerType]

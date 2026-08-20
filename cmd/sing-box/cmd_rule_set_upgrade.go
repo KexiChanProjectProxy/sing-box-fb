@@ -24,7 +24,7 @@ var commandRuleSetUpgrade = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		err := upgradeRuleSet(args[0])
 		if err != nil {
-			log.Fatal(err)
+			log.FatalEvent("cli.error", err.Error(), log.Err(err))
 		}
 	},
 }
@@ -58,7 +58,7 @@ func upgradeRuleSet(sourcePath string) error {
 	switch plainRuleSetCompat.Version {
 	case C.RuleSetVersion1:
 	default:
-		log.Info("already up-to-date")
+		os.Stderr.WriteString("already up-to-date\n")
 		return nil
 	}
 	plainRuleSetCompat.Options, err = plainRuleSetCompat.Upgrade()

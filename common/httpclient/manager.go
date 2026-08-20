@@ -8,7 +8,6 @@ import (
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
 	E "github.com/sagernet/sing/common/exceptions"
-	"github.com/sagernet/sing/common/logger"
 )
 
 var (
@@ -18,7 +17,7 @@ var (
 
 type Manager struct {
 	ctx                      context.Context
-	logger                   log.ContextLogger
+	logger                   log.StructuredLogger
 	access                   sync.Mutex
 	defines                  map[string]option.HTTPClient
 	sharedTransports         map[string]*sharedManagedTransport
@@ -33,7 +32,7 @@ type sharedManagedTransport struct {
 	shared  *sharedState
 }
 
-func NewManager(ctx context.Context, logger log.ContextLogger, clients []option.HTTPClient, defaultHTTPClient string) *Manager {
+func NewManager(ctx context.Context, logger log.StructuredLogger, clients []option.HTTPClient, defaultHTTPClient string) *Manager {
 	defines := make(map[string]option.HTTPClient, len(clients))
 	for _, client := range clients {
 		defines[client.Tag] = client
@@ -79,7 +78,8 @@ func (m *Manager) DefaultTransport() adapter.HTTPTransport {
 	if m.defaultTransport == nil && m.defaultTransportFallback != nil {
 		transport, err := m.defaultTransportFallback()
 		if err != nil {
-			m.logger.Error(E.Cause(err, "create default http client"))
+			m.logger.ErrorEvent("httpclient.error", "create default http client", log.Err(err))
+
 			return nil
 		}
 		m.managedTransports = append(m.managedTransports, transport)
@@ -94,7 +94,7 @@ func (m *Manager) DefaultTransport() adapter.HTTPTransport {
 	return newSharedRef(m.defaultTransport.managed, m.defaultTransport.shared)
 }
 
-func (m *Manager) ResolveTransport(ctx context.Context, logger logger.ContextLogger, options option.HTTPClientOptions) (adapter.HTTPTransport, error) {
+func (m *Manager) ResolveTransport(ctx context.Context, logger log.StructuredLogger, options option.HTTPClientOptions) (adapter.HTTPTransport, error) {
 	if options.Tag != "" {
 		if options.ResolveOnDetour {
 			define, loaded := m.defines[options.Tag]

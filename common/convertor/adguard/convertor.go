@@ -10,10 +10,10 @@ import (
 	"strings"
 
 	C "github.com/sagernet/sing-box/constant"
+	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing/common"
 	E "github.com/sagernet/sing/common/exceptions"
-	"github.com/sagernet/sing/common/logger"
 	M "github.com/sagernet/sing/common/metadata"
 )
 
@@ -28,7 +28,7 @@ type agdguardRuleLine struct {
 	isImportant bool
 }
 
-func ToOptions(reader io.Reader, logger logger.Logger) ([]option.HeadlessRule, error) {
+func ToOptions(reader io.Reader, logger log.StructuredLogger) ([]option.HeadlessRule, error) {
 	scanner := bufio.NewScanner(reader)
 	var (
 		ruleLines    []agdguardRuleLine
@@ -94,7 +94,8 @@ parseLine:
 				}
 				if !ignored {
 					ignoredLines++
-					logger.Debug("ignored unsupported rule with modifier: ", paramParts[0], ": ", originRuleLine)
+					logger.DebugEvent("ruleset.ignored", "ignored rule", log.String("reason", paramParts[0]), log.String("rule", originRuleLine))
+
 					continue parseLine
 				}
 			}
@@ -120,7 +121,8 @@ parseLine:
 			ruleLine = ruleLine[1 : len(ruleLine)-1]
 			if ignoreIPCIDRRegexp(ruleLine) {
 				ignoredLines++
-				logger.Debug("ignored unsupported rule with IPCIDR regexp: ", originRuleLine)
+				logger.DebugEvent("ruleset.ignored", "ignored rule", log.String("reason", "ipcidr_regexp"), log.String("rule", originRuleLine))
+
 				continue
 			}
 			isRegexp = true
@@ -131,24 +133,28 @@ parseLine:
 			}
 			if strings.Contains(ruleLine, "/") {
 				ignoredLines++
-				logger.Debug("ignored unsupported rule with path: ", originRuleLine)
+				logger.DebugEvent("ruleset.ignored", "ignored rule", log.String("reason", "path"), log.String("rule", originRuleLine))
+
 				continue
 			}
 			if strings.Contains(ruleLine, "?") || strings.Contains(ruleLine, "&") {
 				ignoredLines++
-				logger.Debug("ignored unsupported rule with query: ", originRuleLine)
+				logger.DebugEvent("ruleset.ignored", "ignored rule", log.String("reason", "query"), log.String("rule", originRuleLine))
+
 				continue
 			}
 			if strings.Contains(ruleLine, "[") || strings.Contains(ruleLine, "]") ||
 				strings.Contains(ruleLine, "(") || strings.Contains(ruleLine, ")") ||
 				strings.Contains(ruleLine, "!") || strings.Contains(ruleLine, "#") {
 				ignoredLines++
-				logger.Debug("ignored unsupported cosmetic filter: ", originRuleLine)
+				logger.DebugEvent("ruleset.ignored", "ignored rule", log.String("reason", "cosmetic"), log.String("rule", originRuleLine))
+
 				continue
 			}
 			if strings.Contains(ruleLine, "~") {
 				ignoredLines++
-				logger.Debug("ignored unsupported rule modifier: ", originRuleLine)
+				logger.DebugEvent("ruleset.ignored", "ignored rule", log.String("reason", "rule_modifier"), log.String("rule", originRuleLine))
+
 				continue
 			}
 			var domainCheck string
@@ -159,7 +165,8 @@ parseLine:
 			}
 			if ruleLine == "" {
 				ignoredLines++
-				logger.Debug("ignored unsupported rule with empty domain", originRuleLine)
+				logger.DebugEvent("ruleset.ignored", "ignored rule", log.String("reason", "empty_domain"), log.String("rule", originRuleLine))
+
 				continue
 			} else {
 				domainCheck = strings.ReplaceAll(domainCheck, "*", "x")
@@ -167,13 +174,16 @@ parseLine:
 					_, ipErr := parseADGuardIPCIDRLine(ruleLine)
 					if ipErr == nil {
 						ignoredLines++
-						logger.Debug("ignored unsupported rule with IPCIDR: ", originRuleLine)
+						logger.DebugEvent("ruleset.ignored", "ignored rule", log.String("reason", "ipcidr"), log.String("rule", originRuleLine))
+
 						continue
 					}
 					if M.ParseSocksaddr(domainCheck).Port != 0 {
-						logger.Debug("ignored unsupported rule with port: ", originRuleLine)
+						logger.DebugEvent("ruleset.ignored", "ignored rule", log.String("reason", "port"), log.String("rule", originRuleLine))
+
 					} else {
-						logger.Debug("ignored unsupported rule with invalid domain: ", originRuleLine)
+						logger.DebugEvent("ruleset.ignored", "ignored rule", log.String("reason", "invalid_domain"), log.String("rule", originRuleLine))
+
 					}
 					ignoredLines++
 					continue
@@ -292,7 +302,8 @@ parseLine:
 		}
 	}
 	if ignoredLines > 0 {
-		logger.Info("parsed rules: ", len(ruleLines), "/", len(ruleLines)+ignoredLines)
+		logger.InfoEvent("ruleset.parsed", "parsed rules", log.Int("accepted", len(ruleLines)), log.Int("ignored", ignoredLines))
+
 	}
 	return []option.HeadlessRule{currentRule}, nil
 }

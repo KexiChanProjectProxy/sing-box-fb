@@ -6,6 +6,7 @@ import (
 	"net/netip"
 	"time"
 
+
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/adapter/inbound"
 	"github.com/sagernet/sing-box/common/listener"
@@ -13,12 +14,13 @@ import (
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
+	tun "github.com/sagernet/sing-tun"
 	"github.com/sagernet/sing/common"
 	"github.com/sagernet/sing/common/buf"
 	"github.com/sagernet/sing/common/control"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
-	"github.com/sagernet/sing/common/udpnat2"
+	"github.com/sagernet/sing/service"
 )
 
 func RegisterTProxy(registry *inbound.Registry) {
@@ -29,12 +31,12 @@ type TProxy struct {
 	inbound.Adapter
 	ctx      context.Context
 	router   adapter.Router
-	logger   log.ContextLogger
+	logger   log.StructuredLogger
 	listener *listener.Listener
-	udpNat   *udpnat.Service
+	udpNat   *tun.UDPNat
 }
 
-func NewTProxy(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.TProxyInboundOptions) (adapter.Inbound, error) {
+func NewTProxy(ctx context.Context, router adapter.Router, logger log.StructuredLogger, tag string, options option.TProxyInboundOptions) (adapter.Inbound, error) {
 	tproxy := &TProxy{
 		Adapter: inbound.NewAdapter(C.TypeTProxy, tag),
 		ctx:     ctx,
@@ -47,7 +49,16 @@ func NewTProxy(ctx context.Context, router adapter.Router, logger log.ContextLog
 	} else {
 		udpTimeout = C.UDPTimeout
 	}
-	tproxy.udpNat = udpnat.New(tproxy, tproxy.preparePacketConnection, udpTimeout, false)
+	networkManager := service.FromContext[adapter.NetworkManager](ctx)
+	tproxy.udpNat = tun.NewUDPNat(tun.UDPNatOptions{
+		Handler:         tproxy,
+		Prepare:         tproxy.preparePacketConnection,
+		Timeout:         udpTimeout,
+		Mapping:         tun.NATMapping(options.UDPMapping),
+		Filtering:       tun.NATFiltering(options.UDPFiltering),
+		MaxSize:         options.UDPNATMax,
+		InterfaceFinder: networkManager.InterfaceFinder(),
+	})
 	tproxy.listener = listener.New(listener.Options{
 		Context:           ctx,
 		Logger:            logger,
@@ -64,10 +75,23 @@ func (t *TProxy) Start(stage adapter.StartStage) error {
 	if stage != adapter.StartStateStart {
 		return nil
 	}
-	return t.listener.Start()
+	err := t.udpNat.Start()
+	if err != nil {
+		return err
+	}
+	err = t.listener.Start()
+	if err != nil {
+		_ = t.udpNat.Close()
+	}
+	return err
+}
+
+func (t *TProxy) InterfaceUpdated() {
+	t.udpNat.Purge()
 }
 
 func (t *TProxy) Close() error {
+	_ = t.udpNat.Close()
 	return t.listener.Close()
 }
 
@@ -75,26 +99,27 @@ func (t *TProxy) NewConnection(ctx context.Context, conn net.Conn, metadata adap
 	metadata.Inbound = t.Tag()
 	metadata.InboundType = t.Type()
 	metadata.Destination = M.SocksaddrFromNet(conn.LocalAddr()).Unwrap()
-	t.logger.InfoContext(ctx, "inbound connection to ", metadata.Destination)
+	adapter.LogInboundConnection(t.logger, ctx, metadata)
+
 	t.router.RouteConnectionEx(ctx, conn, metadata, onClose)
 }
 
 func (t *TProxy) NewPacketConnectionEx(ctx context.Context, conn N.PacketConn, source M.Socksaddr, destination M.Socksaddr, onClose N.CloseHandlerFunc) {
-	t.logger.InfoContext(ctx, "inbound packet connection from ", source)
-	t.logger.InfoContext(ctx, "inbound packet connection to ", destination)
 	var metadata adapter.InboundContext
 	metadata.Inbound = t.Tag()
 	metadata.InboundType = t.Type()
 	metadata.Source = source
 	metadata.Destination = destination
 	metadata.OriginDestination = t.listener.UDPAddr()
+	adapter.LogInboundPacket(t.logger, ctx, metadata)
 	t.router.RoutePacketConnectionEx(ctx, conn, metadata, onClose)
 }
 
 func (t *TProxy) NewPacket(buffer *buf.Buffer, oob []byte, source M.Socksaddr) {
 	destination, err := redir.GetOriginalDestinationFromOOB(oob)
 	if err != nil {
-		t.logger.Warn("process packet from ", source, ": get tproxy destination: ", err)
+		adapter.LogConnectionError(t.logger, t.ctx, err, source)
+
 		return
 	}
 	t.udpNat.NewPacket([][]byte{buffer.Bytes()}, source, M.SocksaddrFromNetIP(destination), nil)
