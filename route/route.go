@@ -142,6 +142,7 @@ func (r *Router) routeConnection(ctx context.Context, conn net.Conn, metadata ad
 			if action.Method == C.RuleActionRejectMethodReply {
 				return E.New("reject method `reply` is not supported for TCP connections")
 			}
+			r.reportRejected(ctx, metadata, selectedRule)
 			return action.Error(ctx)
 		case *R.RuleActionHijackDNS:
 			for _, buffer := range buffers {
@@ -161,7 +162,11 @@ func (r *Router) routeConnection(ctx context.Context, conn net.Conn, metadata ad
 	}
 
 	ctx = ApplyPreferDomain(ctx, &metadata, selectedOutbound)
-
+	ctx, err = ApplyOverrideIP(ctx, &metadata, selectedOutbound, r.dns, r.dnsTransport)
+	if err != nil {
+		buf.ReleaseMulti(buffers)
+		return err
+	}
 	for _, buffer := range buffers {
 		conn = bufio.NewCachedConn(conn, buffer)
 	}
@@ -276,6 +281,7 @@ func (r *Router) routePacketConnection(ctx context.Context, conn N.PacketConn, m
 			if action.Method == C.RuleActionRejectMethodReply {
 				return E.New("reject method `reply` is not supported for UDP connections")
 			}
+			r.reportRejected(ctx, metadata, selectedRule)
 			return action.Error(ctx)
 		case *R.RuleActionHijackDNS:
 			return r.hijackDNSPacket(ctx, conn, packetBuffers, metadata, onClose)
@@ -291,7 +297,11 @@ func (r *Router) routePacketConnection(ctx context.Context, conn N.PacketConn, m
 	}
 
 	ctx = ApplyPreferDomain(ctx, &metadata, selectedOutbound)
-
+	ctx, err = ApplyOverrideIP(ctx, &metadata, selectedOutbound, r.dns, r.dnsTransport)
+	if err != nil {
+		N.ReleaseMultiPacketBuffer(packetBuffers)
+		return err
+	}
 	for _, buffer := range packetBuffers {
 		conn = bufio.NewCachedPacketConn(conn, buffer.Buffer, buffer.Destination)
 		N.PutPacketBuffer(buffer)
@@ -319,6 +329,14 @@ func ruleLogFields(index int, rule adapter.Rule) []log.Field {
 		fields = append(fields, log.String("rule", description))
 	}
 	return fields
+}
+
+func (r *Router) reportRejected(ctx context.Context, metadata adapter.InboundContext, matchedRule adapter.Rule) {
+	for _, tracker := range r.trackers {
+		if handler, ok := tracker.(adapter.ConnectionRejectHandler); ok {
+			handler.RejectedConnection(ctx, metadata, matchedRule)
+		}
+	}
 }
 
 func (r *Router) PreMatch(metadata adapter.InboundContext, firstPacket []byte) adapter.PreMatchResult {
@@ -393,6 +411,7 @@ func (r *Router) PreMatch(metadata adapter.InboundContext, firstPacket []byte) a
 			return r.preMatchFlow(ctx, &metadata, packetDestination, currentRule, action.Outbound)
 		case *R.RuleActionReject:
 			rejectErr := action.Error(r.ctx)
+			r.reportRejected(ctx, metadata, currentRule)
 			if errors.Is(rejectErr, R.ErrDrop) {
 				return adapter.PreMatchResult{Action: adapter.PreMatchDrop}
 			}
