@@ -155,15 +155,11 @@ func (h *inboundHandler) NewConnectionEx(ctx context.Context, conn net.Conn, sou
 	metadata.Source = source
 	metadata.Destination = destination.Unwrap()
 	if userName, _ := auth.UserFromContext[string](ctx); userName != "" {
-		h.userLock.RLock()
-		displayName, hasManaged := h.managedNames[userName]
-		h.userLock.RUnlock()
+		// ReplaceUsers stores the panel user_id as the AnyTLS auth name.
+		// auth_user matches metadata.User, so keep the immutable user_id here
+		// instead of remapping to the mutable display name.
 		metadata.UserID = userName
-		if hasManaged {
-			metadata.User = displayName
-		} else {
-			metadata.User = userName
-		}
+		metadata.User = userName
 	}
 	adapter.LogInboundConnection(h.logger, ctx, metadata)
 	h.router.RouteConnectionEx(ctx, conn, metadata, onClose)

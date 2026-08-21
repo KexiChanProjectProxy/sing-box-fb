@@ -218,6 +218,10 @@ func NewInbound(ctx context.Context, router adapter.Router, logger log.Structure
 
 // ReplaceUsers replaces the entire managed user set.
 // It implements adapter.ManagedUserInbound.
+//
+// auth_user matches metadata.User. Panel routing compiles auth_user from the
+// immutable user_id, so metadata.User must be UserID rather than the mutable
+// display name.
 func (h *Inbound) ReplaceUsers(users []adapter.ManagedUser) error {
 	userIDs := make([]int, len(users))
 	panelUserIDs := make([]string, len(users))
@@ -227,10 +231,10 @@ func (h *Inbound) ReplaceUsers(users []adapter.ManagedUser) error {
 		userIDs[i] = i
 		panelUserIDs[i] = u.UserID
 		passwords[i] = u.Credential.Password
-		if u.Name != "" {
-			names[i] = u.Name
-		} else {
+		if u.UserID != "" {
 			names[i] = u.UserID
+		} else {
+			names[i] = u.Name
 		}
 	}
 	if h.service != nil {

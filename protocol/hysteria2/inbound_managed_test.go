@@ -28,8 +28,8 @@ func TestReplaceUsersBasic(t *testing.T) {
 
 	require.Equal(t, []string{"u1", "u2"}, ids)
 	require.Len(t, names, 2)
-	require.Equal(t, "alice", names[0])
-	require.Equal(t, "bob", names[1])
+	require.Equal(t, "u1", names[0])
+	require.Equal(t, "u2", names[1])
 }
 
 func TestReplaceUsersEmptyRemovesAll(t *testing.T) {
@@ -91,7 +91,7 @@ func TestReplaceUsersAuthoritativeSnapshot(t *testing.T) {
 
 	require.Equal(t, []string{"u1"}, ids)
 	require.Len(t, names, 1)
-	require.Equal(t, "alice-updated", names[0])
+	require.Equal(t, "u1", names[0])
 }
 
 func TestReplaceUsersConcurrent(t *testing.T) {
