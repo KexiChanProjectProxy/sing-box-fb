@@ -128,9 +128,10 @@ type UserSnapshot struct {
 
 // User represents one managed user within a UserSnapshot.
 type User struct {
-	UserID     string     `json:"user_id"`
-	Name       string     `json:"name"`
-	Credential Credential `json:"credential"`
+	UserID          string               `json:"user_id"`
+	Name            string               `json:"name"`
+	RuntimeIdentity *UserRuntimeIdentity `json:"runtime_identity,omitempty"`
+	Credential      Credential           `json:"credential"`
 }
 
 // Credential holds the authentication material for a user.

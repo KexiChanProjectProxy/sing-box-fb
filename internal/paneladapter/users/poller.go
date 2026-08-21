@@ -10,6 +10,7 @@ package users
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync/atomic"
 
 	"github.com/sagernet/sing-box/adapter"
@@ -250,20 +251,35 @@ func (p *Poller) validateSnapshot(snap *contract.UserSnapshot, inboundID string,
 }
 
 // convertUsers converts a contract.UserSnapshot to []adapter.ManagedUser.
+// ManagedUser.Name is the auth_user routing identity (immutable user_id),
+// not the mutable display name.
 func convertUsers(snapshot *contract.UserSnapshot) []adapter.ManagedUser {
 	users := make([]adapter.ManagedUser, len(snapshot.Users))
 	for i, u := range snapshot.Users {
+		identity := routingIdentity(u)
 		users[i] = adapter.ManagedUser{
 			UserID: u.UserID,
-			Name:   u.Name,
+			Name:   identity,
 			Credential: adapter.ManagedUserCredential{
 				UserID:   u.UserID,
-				Name:     u.Name,
+				Name:     identity,
 				Password: u.Credential.Password,
 			},
 		}
 	}
 	return users
+}
+
+func routingIdentity(u contract.User) string {
+	if u.RuntimeIdentity != nil && u.RuntimeIdentity.Source == contract.UserIdentitySourceUserID {
+		if value := strings.TrimSpace(u.RuntimeIdentity.Value); value != "" {
+			return value
+		}
+	}
+	if userID := strings.TrimSpace(u.UserID); userID != "" {
+		return userID
+	}
+	return strings.TrimSpace(u.Name)
 }
 
 // setInboundStatus updates the UserLoadStatus for an inbound in the store.

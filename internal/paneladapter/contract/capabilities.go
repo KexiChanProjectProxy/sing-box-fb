@@ -6,6 +6,11 @@ const (
 	UserRoutingAdapterVersion    = "1.0.0-user-routing.1"
 )
 
+type UserRuntimeIdentity struct {
+	Source string `json:"source"`
+	Value  string `json:"value"`
+}
+
 type AdapterCapabilities struct {
 	UserRouting *UserRoutingCapability `json:"user_routing,omitempty"`
 }

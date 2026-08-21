@@ -793,19 +793,40 @@ func TestConvertUsers(t *testing.T) {
 		t.Fatalf("expected 2 users, got %d", len(users))
 	}
 
-	if users[0].UserID != "u1" || users[0].Name != "alice" {
-		t.Errorf("user[0] = {%q, %q}, want {u1, alice}", users[0].UserID, users[0].Name)
+	if users[0].UserID != "u1" || users[0].Name != "u1" {
+		t.Errorf("user[0] = {%q, %q}, want {u1, u1}", users[0].UserID, users[0].Name)
 	}
-	if users[0].Credential.UserID != "u1" || users[0].Credential.Name != "alice" || users[0].Credential.Password != "pass1" {
-		t.Errorf("user[0].Credential = {%q, %q, %q}, want {u1, alice, pass1}",
+	if users[0].Credential.UserID != "u1" || users[0].Credential.Name != "u1" || users[0].Credential.Password != "pass1" {
+		t.Errorf("user[0].Credential = {%q, %q, %q}, want {u1, u1, pass1}",
 			users[0].Credential.UserID, users[0].Credential.Name, users[0].Credential.Password)
 	}
 
-	if users[1].UserID != "u2" || users[1].Name != "bob" {
-		t.Errorf("user[1] = {%q, %q}, want {u2, bob}", users[1].UserID, users[1].Name)
+	if users[1].UserID != "u2" || users[1].Name != "u2" {
+		t.Errorf("user[1] = {%q, %q}, want {u2, u2}", users[1].UserID, users[1].Name)
 	}
 	if users[1].Credential.Password != "pass2" {
 		t.Errorf("user[1].Credential.Password = %q, want pass2", users[1].Credential.Password)
+	}
+}
+
+func TestConvertUsers_prefersRuntimeIdentity(t *testing.T) {
+	snap := &contract.UserSnapshot{
+		Users: []contract.User{{
+			UserID: "u1",
+			Name:   "Platform Operator",
+			RuntimeIdentity: &contract.UserRuntimeIdentity{
+				Source: contract.UserIdentitySourceUserID,
+				Value:  "019f7b66-60ec-7026-95af-9a9e77237ae5",
+			},
+			Credential: contract.Credential{Type: contract.CredentialTypePassword, Password: "pass"},
+		}},
+	}
+	users := convertUsers(snap)
+	if len(users) != 1 {
+		t.Fatalf("expected 1 user, got %d", len(users))
+	}
+	if users[0].Name != "019f7b66-60ec-7026-95af-9a9e77237ae5" {
+		t.Fatalf("routing identity = %q, want immutable user_id", users[0].Name)
 	}
 }
 
