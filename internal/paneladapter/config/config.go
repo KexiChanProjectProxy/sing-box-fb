@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/gofrs/uuid/v5"
 )
 
 // Duration wraps time.Duration for JSON marshaling as a Go duration string
@@ -50,8 +52,10 @@ type PollBounds struct {
 // All fields use snake_case JSON tags — never V2bX-style names.
 type Config struct {
 	PanelBaseURL          string      `json:"panel_base_url"`
-	NodeID                string      `json:"node_id"`
-	NodeToken             string      `json:"node_token"`
+	AgentID               string      `json:"agent_id,omitempty"`
+	AgentToken            string      `json:"agent_token,omitempty"`
+	NodeID                string      `json:"node_id,omitempty"`
+	NodeToken             string      `json:"node_token,omitempty"`
 	TokenRotationInterval Duration    `json:"token_rotation_interval,omitempty"`
 	StatePath             string      `json:"state_path"`
 	GeneratedConfigPath   string      `json:"generated_config_path,omitempty"`
@@ -59,6 +63,17 @@ type Config struct {
 	PollIntervalBounds    *PollBounds `json:"poll_interval_bounds,omitempty"`
 	LogLevel              string      `json:"log_level,omitempty"`
 	Insecure              bool        `json:"insecure,omitempty"`
+}
+
+func (c *Config) IsAgentMode() bool {
+	return c.AgentID != "" && c.AgentToken != ""
+}
+
+func (c *Config) BearerToken() string {
+	if c.IsAgentMode() {
+		return c.AgentToken
+	}
+	return c.NodeToken
 }
 
 // Load reads and decodes a Config from the given file path.
@@ -103,14 +118,27 @@ func (c *Config) Validate() error {
 		}
 	}
 
-	// Required: NodeID
-	if c.NodeID == "" {
-		return fmt.Errorf("node_id is required")
+	hasAgentID := c.AgentID != ""
+	hasAgentToken := c.AgentToken != ""
+	hasNodeID := c.NodeID != ""
+	hasNodeToken := c.NodeToken != ""
+	if hasAgentID != hasAgentToken {
+		return fmt.Errorf("agent_id and agent_token must be configured together")
 	}
-
-	// Required: NodeToken
-	if c.NodeToken == "" {
-		return fmt.Errorf("node_token is required")
+	if hasNodeID != hasNodeToken {
+		return fmt.Errorf("node_id and node_token must be configured together")
+	}
+	if hasAgentID && hasNodeID {
+		return fmt.Errorf("agent and node credentials are mutually exclusive")
+	}
+	if !hasAgentID && !hasNodeID {
+		return fmt.Errorf("agent_id/agent_token or node_id/node_token is required")
+	}
+	if hasAgentID {
+		agentID, err := uuid.FromString(c.AgentID)
+		if err != nil || agentID.Version() != uuid.V7 {
+			return fmt.Errorf("agent_id must be a UUIDv7")
+		}
 	}
 	if c.TokenRotationInterval.Duration < 0 {
 		return fmt.Errorf("token_rotation_interval must not be negative")
@@ -149,14 +177,39 @@ func (c *Config) Validate() error {
 // UpdateNodeToken atomically replaces node_token while preserving the rest of
 // the validated adapter configuration. The secret file is always mode 0600.
 func UpdateNodeToken(path, token string) error {
+	return updateToken(path, token, false)
+}
+
+// UpdateAgentToken atomically replaces agent_token while preserving the rest
+// of the validated adapter configuration. The secret file is always mode 0600.
+func UpdateAgentToken(path, token string) error {
+	return updateToken(path, token, true)
+}
+
+func UpdateToken(path, token string) error {
+	cfg, err := Load(path)
+	if err != nil {
+		return err
+	}
+	return updateToken(path, token, cfg.IsAgentMode())
+}
+
+func updateToken(path, token string, agentMode bool) error {
 	if token == "" {
-		return fmt.Errorf("node_token is required")
+		return fmt.Errorf("adapter token is required")
 	}
 	cfg, err := Load(path)
 	if err != nil {
 		return err
 	}
-	cfg.NodeToken = token
+	if cfg.IsAgentMode() != agentMode {
+		return fmt.Errorf("adapter credential mode does not match token update")
+	}
+	if agentMode {
+		cfg.AgentToken = token
+	} else {
+		cfg.NodeToken = token
+	}
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode config: %w", err)

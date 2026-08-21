@@ -61,14 +61,14 @@ type Option func(*Poller)
 // It is called synchronously by the runtime Manager on each user-poll tick.
 type Poller struct {
 	fetcher       UserFetcher
-	store         *state.Store
+	store         state.Repository
 	box           UserReplacer
 	logger        log.ContextLogger
 	configRefetch atomic.Bool
 }
 
 // NewPoller creates a user polling/apply state machine.
-func NewPoller(fetcher UserFetcher, s *state.Store, box UserReplacer, logger log.ContextLogger, opts ...Option) *Poller {
+func NewPoller(fetcher UserFetcher, s state.Repository, box UserReplacer, logger log.ContextLogger, opts ...Option) *Poller {
 	p := &Poller{
 		fetcher: fetcher,
 		store:   s,

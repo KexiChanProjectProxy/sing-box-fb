@@ -47,7 +47,9 @@ func TestRunTokenRotation_retriesPendingTokenWithoutRequestingAnother(t *testing
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		runTokenRotationWithRetry(ctx, panelClient, configPath, 10*time.Millisecond, 200*time.Millisecond, log.NewNOPFactory().Logger())
+		runTokenRotation(ctx, panelClient, tokenRotationSchedule{
+			Path: configPath, Interval: 10 * time.Millisecond, RetryInterval: 200 * time.Millisecond, Logger: log.NewNOPFactory().Logger(),
+		})
 	}()
 
 	select {

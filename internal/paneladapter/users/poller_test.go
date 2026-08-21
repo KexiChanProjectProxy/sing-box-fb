@@ -10,6 +10,7 @@ import (
 	"github.com/sagernet/sing-box/internal/paneladapter/client"
 	"github.com/sagernet/sing-box/internal/paneladapter/contract"
 	"github.com/sagernet/sing-box/internal/paneladapter/state"
+
 	"github.com/sagernet/sing-box/log"
 )
 
