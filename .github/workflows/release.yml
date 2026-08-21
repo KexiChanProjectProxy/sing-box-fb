@@ -17,8 +17,12 @@ jobs:
         include:
           - arch: amd64
             goarch: amd64
+            cc: gcc
+            cxx: g++
           - arch: arm64
             goarch: arm64
+            cc: aarch64-linux-gnu-gcc
+            cxx: aarch64-linux-gnu-g++
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -29,6 +33,10 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: ~1.25.9
+
+      - name: Install aarch64 cross compiler
+        if: matrix.goarch == 'arm64'
+        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 
       - name: Set version
         run: |
@@ -41,29 +49,43 @@ jobs:
           echo "LDFLAGS_SHARED=$(cat release/LDFLAGS)" >> "${GITHUB_ENV}"
 
       - name: Build
+        env:
+          CGO_ENABLED: "1"
+          GOOS: linux
+          GOARCH: ${{ matrix.goarch }}
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
         run: |
           set -xeuo pipefail
           mkdir -p dist
-          CGO_ENABLED=0 GOOS=linux GOARCH=${{ matrix.goarch }} \
-          go build -v -trimpath -o dist/sing-box \
-          -tags "${BUILD_TAGS},with_purego" \
-          -ldflags "-X 'github.com/sagernet/sing-box/constant.Version=${VERSION}' ${LDFLAGS_SHARED} -s -w -buildid=" \
-          ./cmd/sing-box
+          LDFLAGS="-X 'github.com/sagernet/sing-box/constant.Version=${VERSION}' ${LDFLAGS_SHARED} -s -w -buildid="
+          go build -trimpath -o dist/sing-box \
+            -tags "${BUILD_TAGS}" \
+            -ldflags "${LDFLAGS}" \
+            ./cmd/sing-box
+          go build -trimpath -o dist/sing-box-panel-adapter \
+            -tags "${BUILD_TAGS}" \
+            -ldflags "${LDFLAGS}" \
+            ./cmd/sing-box-panel-adapter
 
       - name: Package
         run: |
+          set -xeuo pipefail
           cd dist
+          gzip -9 -k -c sing-box > "sing-box-linux-${{ matrix.arch }}.gz"
+          gzip -9 -k -c sing-box-panel-adapter > "sing-box-panel-adapter-linux-${{ matrix.arch }}.gz"
           DIR_NAME="sing-box-${VERSION}-linux-${{ matrix.arch }}"
           mkdir -p "${DIR_NAME}"
-          mv sing-box "${DIR_NAME}/"
+          cp sing-box "${DIR_NAME}/"
           cp -r ../release/config/ "${DIR_NAME}/config/" 2>/dev/null || true
           tar czf "${DIR_NAME}.tar.gz" "${DIR_NAME}"
+          rm -rf "${DIR_NAME}" sing-box sing-box-panel-adapter
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: binary-linux-${{ matrix.arch }}
-          path: dist/*.tar.gz
+          path: dist/*
 
   release:
     name: Create GitHub Release
@@ -87,11 +109,17 @@ jobs:
           path: dist
           merge-multiple: true
 
+      - name: Checksums
+        run: |
+          set -xeuo pipefail
+          cd dist
+          sha256sum * > SHA256SUMS
+
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          name: ${{ github.ref_name }}
+          name: sing-box-fb ${{ env.VERSION }}
           draft: false
           prerelease: false
           files: dist/*
