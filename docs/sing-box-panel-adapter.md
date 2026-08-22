@@ -164,6 +164,29 @@ and reports them to the panel:
   `(node_id, inbound_id, user_id)`. The same `user_id` may appear in
   multiple inbounds with different credentials.
 
+## ClickHouse access logs
+
+The panel may push ClickHouse sink settings on
+`GET /api/v1/nodes/{node_id}/configuration` via the optional `clickhouse`
+object (`server`, `server_port`, `database`, `table`, `username`,
+`password`, `protocol`, `tls`). The adapter injects a
+[`clickhouse` service](configuration/service/clickhouse.md) into the
+sing-box template before Box creation:
+
+- **Node id:** `os.Hostname()` is written as the service `tag` (the
+  ClickHouse `node` column). If hostname is unavailable, panel `node_id`
+  is used.
+- **Table:** defaults to `sessions` when omitted. The table must already
+  exist; sing-box does not create it.
+- **Replacement:** any `type=clickhouse` service already in the template
+  is replaced so the panel is the source of truth for address and
+  credentials.
+- **Omitted `clickhouse`:** no injection; a template-defined ClickHouse
+  service is left unchanged.
+
+ClickHouse must be reachable at Box start. Address and credentials are
+applied on configuration change (Box recreation).
+
 ## Heartbeat statuses
 
 The adapter reports per-inbound user load status in heartbeats. All six

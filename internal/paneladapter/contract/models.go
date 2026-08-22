@@ -98,8 +98,29 @@ type ConfigurationResponse struct {
 	NodeID                string           `json:"node_id"`
 	ApplyStrategy         ApplyStrategy    `json:"apply_strategy"`
 	PollIntervals         PollIntervals    `json:"poll_intervals"`
-	ManagedInbounds       []ManagedInbound `json:"managed_inbounds"`
-	SingBoxConfigTemplate json.RawMessage  `json:"sing_box_config_template"`
+	ManagedInbounds       []ManagedInbound  `json:"managed_inbounds"`
+	ClickHouse            *ClickHouseConfig `json:"clickhouse,omitempty"`
+	SingBoxConfigTemplate json.RawMessage   `json:"sing_box_config_template"`
+}
+
+// ClickHouseConfig is optional panel-pushed access-log sink settings.
+// The adapter injects a clickhouse service and sets tag to the local hostname.
+type ClickHouseConfig struct {
+	Server     string         `json:"server"`
+	ServerPort uint16         `json:"server_port,omitempty"`
+	Database   string         `json:"database,omitempty"`
+	Table      string         `json:"table,omitempty"`
+	Username   string         `json:"username,omitempty"`
+	Password   string         `json:"password,omitempty"`
+	Protocol   string         `json:"protocol,omitempty"`
+	TLS        *ClickHouseTLS `json:"tls,omitempty"`
+}
+
+// ClickHouseTLS is the subset of outbound TLS the panel may push for ClickHouse.
+type ClickHouseTLS struct {
+	Enabled    bool   `json:"enabled,omitempty"`
+	ServerName string `json:"server_name,omitempty"`
+	Insecure   bool   `json:"insecure,omitempty"`
 }
 
 // ManagedInbound describes one panel-managed inbound endpoint.

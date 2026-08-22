@@ -174,6 +174,80 @@ func TestConfigurationResponse_Validate_MissingFields(t *testing.T) {
 	}
 }
 
+func TestConfigurationResponse_Validate_ClickHouseOptional(t *testing.T) {
+	cfg := validConfigurationResponse()
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("omitted clickhouse should be valid: %v", err)
+	}
+	cfg.ClickHouse = &ClickHouseConfig{
+		Server:   "ch.example.com",
+		Protocol: "native",
+		Username: "writer",
+		Password: "secret",
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("valid clickhouse should pass: %v", err)
+	}
+}
+
+func TestConfigurationResponse_Validate_ClickHouseErrors(t *testing.T) {
+	tests := []struct {
+		name    string
+		ch      *ClickHouseConfig
+		wantErr string
+	}{
+		{"missing server", &ClickHouseConfig{}, "missing server"},
+		{"unknown protocol", &ClickHouseConfig{Server: "ch.example.com", Protocol: "grpc"}, "unknown protocol"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := validConfigurationResponse()
+			cfg.ClickHouse = tt.ch
+			err := cfg.Validate()
+			if err == nil {
+				t.Fatalf("expected error containing %q, got nil", tt.wantErr)
+			}
+			if !contains(err.Error(), tt.wantErr) {
+				t.Fatalf("error %q should contain %q", err.Error(), tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestConfigurationResponse_JSONRoundTrip_ClickHouse(t *testing.T) {
+	orig := validConfigurationResponse()
+	orig.ClickHouse = &ClickHouseConfig{
+		Server:     "ch.example.com",
+		ServerPort: 9440,
+		Database:   "logs",
+		Table:      "sessions",
+		Username:   "writer",
+		Password:   "secret",
+		Protocol:   "native",
+		TLS:        &ClickHouseTLS{Enabled: true, ServerName: "ch.example.com"},
+	}
+	data, err := json.Marshal(orig)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var decoded ConfigurationResponse
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if decoded.ClickHouse == nil {
+		t.Fatal("expected clickhouse after round trip")
+	}
+	if decoded.ClickHouse.Server != orig.ClickHouse.Server {
+		t.Errorf("server mismatch: got %q want %q", decoded.ClickHouse.Server, orig.ClickHouse.Server)
+	}
+	if decoded.ClickHouse.Password != orig.ClickHouse.Password {
+		t.Errorf("password mismatch")
+	}
+	if decoded.ClickHouse.TLS == nil || !decoded.ClickHouse.TLS.Enabled {
+		t.Errorf("tls.enabled mismatch")
+	}
+}
+
 func TestConfigurationResponse_Validate_DuplicateInboundID(t *testing.T) {
 	cfg := validConfigurationResponse()
 	cfg.ManagedInbounds = []ManagedInbound{

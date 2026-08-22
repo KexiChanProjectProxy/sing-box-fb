@@ -151,9 +151,10 @@ func (m *Manager) StartTime() time.Time {
 //  2. Validate the response with cfg.Validate()
 //  3. For each managed inbound, check protocol support
 //  4. Strip managed inbound user arrays to empty in the template
-//  5. Unmarshal the stripped template into option.Options
-//  6. Create and start box.Box
-//  7. Record applied revision and inbound metadata in state
+//  5. Inject panel-pushed ClickHouse access log (tag = local hostname)
+//  6. Unmarshal the prepared template into option.Options
+//  7. Create and start box.Box
+//  8. Record applied revision and inbound metadata in state
 //
 // Managed inbounds start fail-closed (empty users) until the first valid
 // user snapshot is applied by the user polling loop (T9).
@@ -257,7 +258,14 @@ func (m *Manager) applyConfigLocked(ctx context.Context, cfg *contract.Configura
 	if err != nil {
 		return E.Cause(err, "strip managed inbound users")
 	}
-
+	node := accessLogNodeID(cfg.NodeID)
+	if cfg.ClickHouse != nil {
+		m.logger.InfoContext(ctx, "injecting clickhouse access log node=", node, " server=", cfg.ClickHouse.Server)
+	}
+	stripped, err = injectClickHouseService(stripped, cfg.ClickHouse, node)
+	if err != nil {
+		return E.Cause(err, "inject clickhouse service")
+	}
 	// Unmarshal into option.Options.
 	var options option.Options
 	if err := commonjson.UnmarshalContext(include.Context(ctx), stripped, &options); err != nil {

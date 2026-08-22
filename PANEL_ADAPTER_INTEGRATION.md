@@ -95,9 +95,20 @@ If-None-Match: "cfg-0005"
       "protocol": "hysteria2"
     }
   ],
+  "clickhouse": {
+    "server": "ch.example.com",
+    "server_port": 9000,
+    "database": "logs",
+    "table": "sessions",
+    "username": "writer",
+    "password": "secret",
+    "protocol": "native"
+  },
   "sing_box_config_template": { ... }
 }
 ```
+
+`clickhouse` 可选。面板下发地址和凭据后，适配器用本机 `hostname` 作为 ClickHouse `node` 列（写入服务 `tag`），注入 `services[].type=clickhouse`。未设 `table` 时默认 `sessions`。表需预先创建。省略该字段则不注入。
 
 **UserSnapshot** — 用户快照：
 
@@ -654,6 +665,15 @@ go build -o mock-panel-server ./cmd/mock-panel-server/
       { "inbound_id": "anytls-main", "tag": "anytls-in", "protocol": "anytls" },
       { "inbound_id": "ss-main", "tag": "ss-in", "protocol": "shadowsocks" }
     ],
+    "clickhouse": {
+      "server": "ch.example.com",
+      "server_port": 9000,
+      "database": "logs",
+      "table": "sessions",
+      "username": "writer",
+      "password": "secret",
+      "protocol": "native"
+    },
     "sing_box_config_template": {
       "inbounds": [],
       "outbounds": [{ "type": "direct", "tag": "direct" }]

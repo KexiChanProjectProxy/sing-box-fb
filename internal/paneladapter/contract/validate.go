@@ -1,6 +1,8 @@
 package contract
 
 import (
+	"strings"
+
 	E "github.com/sagernet/sing/common/exceptions"
 )
 
@@ -52,6 +54,24 @@ func (c *ConfigurationResponse) Validate() error {
 	}
 	if len(c.SingBoxConfigTemplate) == 0 {
 		return E.New("missing sing_box_config_template")
+	}
+	if c.ClickHouse != nil {
+		if err := c.ClickHouse.Validate(); err != nil {
+			return E.Cause(err, "clickhouse")
+		}
+	}
+	return nil
+}
+
+// Validate checks ClickHouse sink settings when the panel pushes them.
+func (c *ClickHouseConfig) Validate() error {
+	if strings.TrimSpace(c.Server) == "" {
+		return E.New("missing server")
+	}
+	switch c.Protocol {
+	case "", "native", "http":
+	default:
+		return E.New("unknown protocol: ", c.Protocol)
 	}
 	return nil
 }
