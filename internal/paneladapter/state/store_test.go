@@ -471,15 +471,21 @@ func TestClone_DeepCopy(t *testing.T) {
 		PendingReports: []PendingReport{
 			{IdempotencyKey: "k1", BodyHash: "h1", RetryCount: 1},
 		},
+		Update: UpdateState{
+			PendingVersion:      "2.0.0",
+			BackupPath:          "/opt/adapter.bak",
+			BlacklistedVersions: []string{"1.9.0"},
+		},
 	}
 	clone := original.Clone()
 
-	// Mutate clone; original should be unaffected.
 	clone.Config.NodeID = "n2"
 	clone.Inbounds["ib-1"] = InboundState{UserCount: 99}
 	clone.Inbounds["ib-2"] = InboundState{Tag: "new"}
 	clone.PendingReports[0].RetryCount = 5
 	clone.PendingReports = append(clone.PendingReports, PendingReport{IdempotencyKey: "k2"})
+	clone.Update.BlacklistedVersions[0] = "changed"
+	clone.Update.BlacklistedVersions = append(clone.Update.BlacklistedVersions, "3.0.0")
 
 	if original.Config.NodeID != "n1" {
 		t.Error("Clone did not deep-copy Config")
@@ -495,6 +501,9 @@ func TestClone_DeepCopy(t *testing.T) {
 	}
 	if len(original.PendingReports) != 1 {
 		t.Error("Clone shared PendingReports backing array with original")
+	}
+	if original.Update.BlacklistedVersions[0] != "1.9.0" || len(original.Update.BlacklistedVersions) != 1 {
+		t.Error("Clone shared Update.BlacklistedVersions with original")
 	}
 }
 
@@ -532,6 +541,7 @@ func TestState_SensitiveFieldsNotInStructTags(t *testing.T) {
 		ConfigState{},
 		InboundState{},
 		PendingReport{},
+		UpdateState{},
 	}
 	for _, typ := range types {
 		b, _ := json.Marshal(typ)

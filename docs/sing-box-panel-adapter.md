@@ -187,6 +187,41 @@ sing-box template before Box creation:
 ClickHouse must be reachable at Box start. Address and credentials are
 applied on configuration change (Box recreation).
 
+## Binary updates
+
+The panel may push a new adapter binary on
+`GET /api/v1/nodes/{node_id}/configuration` via the optional `binary`
+object:
+
+```json
+{
+  "version": "1.14.0.12-fb.abc",
+  "url": "https://example.com/sing-box-panel-adapter-linux-amd64.gz",
+  "sha256": "64-hex-chars-of-the-downloaded-artifact",
+  "downloads": {
+    "linux/amd64": { "url": "https://example.com/amd64.gz", "sha256": "..." },
+    "linux/arm64": { "url": "https://example.com/arm64.gz", "sha256": "..." }
+  }
+}
+```
+
+- `version` is compared to `constant.Version` of the running process.
+  Matching versions are ignored. `sha256` is of the **downloaded bytes**
+  (gzip/tar.gz included), not the inner ELF.
+- `downloads` is keyed by `GOOS/GOARCH` and wins for the local architecture;
+  otherwise `url`/`sha256` are used.
+- The adapter downloads, verifies, unpacks (raw, gzip, or tar/tar.gz),
+  copies the current executable to `*.bak`, records a pending version in
+  state, flushes traffic, replaces the file, and `exec`s the new binary.
+- If `exec` fails, the backup is restored immediately and the version is
+  **blacklisted**.
+- If `exec` succeeds, the new process is a trial start: bootstrap failure
+  restores `*.bak`, blacklists the version, and execs the old binary.
+  Successful bootstrap clears pending state and deletes the backup.
+- Blacklisted versions are skipped on later polls and reported on
+  heartbeats as `blacklisted_binary_versions`.
+- Omitted `binary`: no update attempt.
+
 ## Heartbeat statuses
 
 The adapter reports per-inbound user load status in heartbeats. All six

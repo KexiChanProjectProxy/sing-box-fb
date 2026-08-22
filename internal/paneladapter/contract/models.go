@@ -93,14 +93,33 @@ type PollIntervals struct {
 // ConfigurationResponse is the payload returned by
 // GET /api/v1/nodes/{node_id}/configuration.
 type ConfigurationResponse struct {
-	Revision              string           `json:"revision"`
-	APIVersion            string           `json:"api_version"`
-	NodeID                string           `json:"node_id"`
-	ApplyStrategy         ApplyStrategy    `json:"apply_strategy"`
-	PollIntervals         PollIntervals    `json:"poll_intervals"`
+	Revision              string            `json:"revision"`
+	APIVersion            string            `json:"api_version"`
+	NodeID                string            `json:"node_id"`
+	ApplyStrategy         ApplyStrategy     `json:"apply_strategy"`
+	PollIntervals         PollIntervals     `json:"poll_intervals"`
 	ManagedInbounds       []ManagedInbound  `json:"managed_inbounds"`
 	ClickHouse            *ClickHouseConfig `json:"clickhouse,omitempty"`
+	Binary                *BinaryUpdate     `json:"binary,omitempty"`
 	SingBoxConfigTemplate json.RawMessage   `json:"sing_box_config_template"`
+}
+
+// BinaryUpdate is optional panel-pushed adapter/node binary version info.
+// When version differs from the running binary, the adapter downloads,
+// atomically replaces, and execs the new file. A failed start rolls back
+// and blacklists that version.
+type BinaryUpdate struct {
+	Version   string                    `json:"version"`
+	URL       string                    `json:"url,omitempty"`
+	SHA256    string                    `json:"sha256,omitempty"`
+	Downloads map[string]BinaryDownload `json:"downloads,omitempty"`
+}
+
+// BinaryDownload is one architecture-specific artifact.
+// downloads keys are GOOS/GOARCH, e.g. "linux/amd64".
+type BinaryDownload struct {
+	URL    string `json:"url"`
+	SHA256 string `json:"sha256"`
 }
 
 // ClickHouseConfig is optional panel-pushed access-log sink settings.
@@ -208,6 +227,7 @@ type Heartbeat struct {
 	PendingConfigurationRevision *string            `json:"pending_configuration_revision,omitempty"`
 	InboundStatuses              []HeartbeatInbound `json:"inbound_statuses"`
 	Runtime                      *HeartbeatRuntime  `json:"runtime,omitempty"`
+	BlacklistedBinaryVersions    []string           `json:"blacklisted_binary_versions,omitempty"`
 }
 
 // HeartbeatInbound reports per-inbound status within a heartbeat.

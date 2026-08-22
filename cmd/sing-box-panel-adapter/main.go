@@ -19,6 +19,7 @@ import (
 	"github.com/sagernet/sing-box/internal/paneladapter/runtime"
 	"github.com/sagernet/sing-box/internal/paneladapter/state"
 	"github.com/sagernet/sing-box/internal/paneladapter/traffic"
+	"github.com/sagernet/sing-box/internal/paneladapter/update"
 	"github.com/sagernet/sing-box/internal/paneladapter/users"
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
@@ -115,10 +116,22 @@ func runAdapter() error {
 
 	// -----------------------------------------------------------------------
 	// Step 5: Create state store.
-	// -----------------------------------------------------------------------
 	store, err := state.NewStore(cfg.StatePath)
 	if err != nil {
 		return E.Cause(err, "create state store")
+	}
+
+	updater, err := update.New(update.Options{
+		Store:          store,
+		Logger:         logger,
+		CurrentVersion: C.Version,
+	})
+	if err != nil {
+		return E.Cause(err, "create binary updater")
+	}
+	trialStart, err := updater.ReconcileStartup()
+	if err != nil {
+		logger.Warn("reconcile binary update: ", err)
 	}
 
 	// -----------------------------------------------------------------------
@@ -138,7 +151,17 @@ func runAdapter() error {
 	// Step 8: Bootstrap — fetch initial config and create Box.
 	// -----------------------------------------------------------------------
 	if err := manager.Bootstrap(ctx); err != nil {
+		if trialStart {
+			if rbErr := updater.RollbackAndBlacklist(err); rbErr != nil {
+				return E.Errors(E.Cause(err, "bootstrap"), rbErr)
+			}
+		}
 		return E.Cause(err, "bootstrap")
+	}
+	if trialStart {
+		if err := updater.CommitSuccess(); err != nil {
+			logger.Warn("commit binary update: ", err)
+		}
 	}
 
 	// After bootstrap, update the traffic tracker's inbound mapping from state.
@@ -167,9 +190,17 @@ func runAdapter() error {
 		reporter.WithConfigRevision(curState.Config.Revision),
 	)
 
-	// Perform reporter recovery for any pending reports from previous runs.
 	if err := rep.Recovery(ctx); err != nil {
 		logger.Warn("reporter recovery: ", err)
+	}
+
+	if err := tryBinaryUpdate(ctx, updater, manager, rep, store, logger); err != nil {
+		logger.Warn("binary update: ", err)
+		if manager.GetBox() == nil {
+			if bErr := manager.Bootstrap(ctx); bErr != nil {
+				return E.Cause(bErr, "re-bootstrap after failed binary update")
+			}
+		}
 	}
 
 	// -----------------------------------------------------------------------
@@ -191,15 +222,21 @@ func runAdapter() error {
 			if err := manager.PollConfiguration(ctx); err != nil {
 				return E.Cause(err, "poll configuration")
 			}
-			// Update traffic tracker mapping after config change.
 			st := store.State()
 			m := make(map[string]string, len(st.Inbounds))
 			for _, ib := range st.Inbounds {
 				m[ib.Tag] = ib.InboundID
 			}
 			tracker.UpdateInboundMapping(m)
-			// Update reporter config revision.
 			rep.SetConfigRevision(st.Config.Revision)
+			if err := tryBinaryUpdate(ctx, updater, manager, rep, store, logger); err != nil {
+				logger.Warn("binary update: ", err)
+				if manager.GetBox() == nil {
+					if bErr := manager.Bootstrap(ctx); bErr != nil {
+						return E.Cause(bErr, "re-bootstrap after failed binary update")
+					}
+				}
+			}
 			return nil
 		})
 	}()
@@ -412,7 +449,6 @@ func runPeriodic(ctx context.Context, name string, interval time.Duration, logge
 // Heartbeat (inline T11 logic)
 // ---------------------------------------------------------------------------
 
-// sendHeartbeat builds and sends a heartbeat to the panel.
 func sendHeartbeat(
 	ctx context.Context,
 	panelClient *client.Client,
@@ -424,7 +460,6 @@ func sendHeartbeat(
 ) error {
 	st := store.State()
 
-	// Build heartbeat inbounds from state.
 	inbounds := make([]contract.HeartbeatInbound, 0, len(st.Inbounds))
 	for _, ib := range st.Inbounds {
 		status := contract.UserLoadStatus(ib.UserLoadStatus)
@@ -446,7 +481,6 @@ func sendHeartbeat(
 		})
 	}
 
-	// Build runtime metrics.
 	runtimeMetrics := tracker.GetRuntimeMetrics()
 	runtimeMetrics.UptimeSeconds = int64(time.Since(manager.StartTime()).Seconds())
 
@@ -457,6 +491,7 @@ func sendHeartbeat(
 		AppliedConfigurationRevision: st.Config.Revision,
 		InboundStatuses:              inbounds,
 		Runtime:                      runtimeMetrics,
+		BlacklistedBinaryVersions:    st.Update.BlacklistedVersions,
 	}
 
 	if err := panelClient.SendHeartbeat(ctx, hb); err != nil {
@@ -465,6 +500,32 @@ func sendHeartbeat(
 
 	logger.Debug("heartbeat sent, revision=", st.Config.Revision)
 	return nil
+}
+
+func tryBinaryUpdate(
+	ctx context.Context,
+	updater *update.Updater,
+	manager *runtime.Manager,
+	rep *reporter.Reporter,
+	store *state.Store,
+	logger log.ContextLogger,
+) error {
+	cfg := manager.LastConfiguration()
+	if cfg == nil || cfg.Binary == nil {
+		return nil
+	}
+	return updater.Apply(ctx, cfg.Binary, func() error {
+		if err := rep.ReportNow(ctx); err != nil {
+			logger.Warn("flush traffic before binary update: ", err)
+		}
+		if err := store.Save(); err != nil {
+			logger.Warn("flush state before binary update: ", err)
+		}
+		if err := manager.Close(); err != nil {
+			return err
+		}
+		return nil
+	})
 }
 
 // ---------------------------------------------------------------------------

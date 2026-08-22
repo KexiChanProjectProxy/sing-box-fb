@@ -1,6 +1,7 @@
 package contract
 
 import (
+	"net/url"
 	"strings"
 
 	E "github.com/sagernet/sing/common/exceptions"
@@ -60,7 +61,65 @@ func (c *ConfigurationResponse) Validate() error {
 			return E.Cause(err, "clickhouse")
 		}
 	}
+	if c.Binary != nil {
+		if err := c.Binary.Validate(); err != nil {
+			return E.Cause(err, "binary")
+		}
+	}
 	return nil
+}
+
+// Validate checks panel-pushed binary update metadata when present.
+func (b *BinaryUpdate) Validate() error {
+	if strings.TrimSpace(b.Version) == "" {
+		return E.New("missing version")
+	}
+	if len(b.Downloads) == 0 {
+		if err := validateBinaryDownload(b.URL, b.SHA256); err != nil {
+			return err
+		}
+		return nil
+	}
+	for key, dl := range b.Downloads {
+		if err := validateBinaryDownload(dl.URL, dl.SHA256); err != nil {
+			return E.Cause(err, "downloads[", key, "]")
+		}
+	}
+	return nil
+}
+
+func validateBinaryDownload(rawURL, sha256 string) error {
+	if strings.TrimSpace(rawURL) == "" {
+		return E.New("missing url")
+	}
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return E.Cause(err, "invalid url")
+	}
+	if parsed.Scheme != "https" && parsed.Scheme != "http" {
+		return E.New("url scheme must be http or https")
+	}
+	if parsed.Host == "" {
+		return E.New("url host is required")
+	}
+	if !validSHA256(sha256) {
+		return E.New("sha256 must be 64 hex characters")
+	}
+	return nil
+}
+
+func validSHA256(sum string) bool {
+	if len(sum) != 64 {
+		return false
+	}
+	for i := 0; i < len(sum); i++ {
+		c := sum[i]
+		if c >= '0' && c <= '9' || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 // Validate checks ClickHouse sink settings when the panel pushes them.

@@ -100,6 +100,7 @@ type Manager struct {
 	instance  *box.Box
 	cancel    context.CancelFunc
 	startedAt time.Time
+	lastCfg   *contract.ConfigurationResponse
 }
 
 // NewManager creates a runtime manager.
@@ -144,6 +145,13 @@ func (m *Manager) StartTime() time.Time {
 	return m.startedAt
 }
 
+// LastConfiguration returns the most recently validated panel configuration.
+func (m *Manager) LastConfiguration() *contract.ConfigurationResponse {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.lastCfg
+}
+
 // Bootstrap performs the initial configuration fetch and Box creation.
 //
 // Flow:
@@ -169,6 +177,7 @@ func (m *Manager) Bootstrap(ctx context.Context) error {
 	if err := cfg.Validate(); err != nil {
 		return E.Cause(err, "validate initial configuration")
 	}
+	m.lastCfg = cfg
 
 	return m.applyConfigLocked(ctx, cfg, etag)
 }
@@ -205,6 +214,7 @@ func (m *Manager) PollConfiguration(ctx context.Context) error {
 	if err := cfg.Validate(); err != nil {
 		return E.Cause(err, "validate polled configuration")
 	}
+	m.lastCfg = cfg
 
 	strategy := cfg.ApplyStrategy.OnConfigurationChange
 	switch strategy {

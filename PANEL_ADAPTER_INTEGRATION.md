@@ -104,11 +104,18 @@ If-None-Match: "cfg-0005"
     "password": "secret",
     "protocol": "native"
   },
+  "binary": {
+    "version": "1.14.0.12-fb.abc",
+    "url": "https://example.com/sing-box-panel-adapter-linux-amd64.gz",
+    "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
   "sing_box_config_template": { ... }
 }
 ```
 
 `clickhouse` 可选。面板下发地址和凭据后，适配器用本机 `hostname` 作为 ClickHouse `node` 列（写入服务 `tag`），注入 `services[].type=clickhouse`。未设 `table` 时默认 `sessions`。表需预先创建。省略该字段则不注入。
+
+`binary` 可选。面板下发最新适配器版本、下载 URL 和 sha256。节点发现版本与当前 `constant.Version` 不同且未被拉黑时：下载校验、原子替换正在运行的二进制并 `exec`。启动失败则回滚 `*.bak` 并拉黑该版本号（心跳字段 `blacklisted_binary_versions`）。`sha256` 是下载文件本身的哈希（含 gzip/tar.gz）。可用 `downloads["linux/amd64"]` 按架构选择产物。
 
 **UserSnapshot** — 用户快照：
 

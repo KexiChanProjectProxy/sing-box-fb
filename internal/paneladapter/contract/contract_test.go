@@ -248,6 +248,72 @@ func TestConfigurationResponse_JSONRoundTrip_ClickHouse(t *testing.T) {
 	}
 }
 
+func TestConfigurationResponse_Validate_BinaryOptional(t *testing.T) {
+	cfg := validConfigurationResponse()
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("omitted binary should be valid: %v", err)
+	}
+	cfg.Binary = &BinaryUpdate{
+		Version: "1.14.0.12",
+		URL:     "https://example.com/sing-box-panel-adapter",
+		SHA256:  "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("valid binary should pass: %v", err)
+	}
+}
+
+func TestConfigurationResponse_Validate_BinaryErrors(t *testing.T) {
+	validSum := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	tests := []struct {
+		name    string
+		bin     *BinaryUpdate
+		wantErr string
+	}{
+		{"missing version", &BinaryUpdate{URL: "https://example.com/b", SHA256: validSum}, "missing version"},
+		{"missing url", &BinaryUpdate{Version: "2.0.0", SHA256: validSum}, "missing url"},
+		{"bad scheme", &BinaryUpdate{Version: "2.0.0", URL: "ftp://example.com/b", SHA256: validSum}, "url scheme"},
+		{"bad sha", &BinaryUpdate{Version: "2.0.0", URL: "https://example.com/b", SHA256: "abc"}, "sha256"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := validConfigurationResponse()
+			cfg.Binary = tt.bin
+			err := cfg.Validate()
+			if err == nil {
+				t.Fatalf("expected error containing %q, got nil", tt.wantErr)
+			}
+			if !contains(err.Error(), tt.wantErr) {
+				t.Fatalf("error %q should contain %q", err.Error(), tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestConfigurationResponse_JSONRoundTrip_Binary(t *testing.T) {
+	orig := validConfigurationResponse()
+	orig.Binary = &BinaryUpdate{
+		Version: "2.0.0",
+		Downloads: map[string]BinaryDownload{
+			"linux/amd64": {URL: "https://example.com/amd64", SHA256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+		},
+	}
+	data, err := json.Marshal(orig)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var decoded ConfigurationResponse
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if decoded.Binary == nil || decoded.Binary.Version != "2.0.0" {
+		t.Fatalf("binary round trip: %+v", decoded.Binary)
+	}
+	if decoded.Binary.Downloads["linux/amd64"].URL != "https://example.com/amd64" {
+		t.Fatalf("downloads: %+v", decoded.Binary.Downloads)
+	}
+}
+
 func TestConfigurationResponse_Validate_DuplicateInboundID(t *testing.T) {
 	cfg := validConfigurationResponse()
 	cfg.ManagedInbounds = []ManagedInbound{

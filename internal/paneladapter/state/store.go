@@ -23,6 +23,15 @@ type State struct {
 	Config         ConfigState             `json:"config"`
 	Inbounds       map[string]InboundState `json:"inbounds"`
 	PendingReports []PendingReport         `json:"pending_reports,omitempty"`
+	Update         UpdateState             `json:"update,omitempty"`
+}
+
+// UpdateState tracks a pending binary replace and blacklisted versions.
+// It MUST NOT contain download URLs or credentials.
+type UpdateState struct {
+	PendingVersion      string   `json:"pending_version,omitempty"`
+	BackupPath          string   `json:"backup_path,omitempty"`
+	BlacklistedVersions []string `json:"blacklisted_versions,omitempty"`
 }
 
 // ConfigState tracks the applied configuration revision and ETag.
@@ -70,6 +79,7 @@ func (s *State) Clone() *State {
 	clone := &State{
 		Version: s.Version,
 		Config:  s.Config,
+		Update:  s.Update.clone(),
 	}
 	clone.Inbounds = make(map[string]InboundState, len(s.Inbounds))
 	for k, v := range s.Inbounds {
@@ -78,6 +88,23 @@ func (s *State) Clone() *State {
 	clone.PendingReports = make([]PendingReport, len(s.PendingReports))
 	copy(clone.PendingReports, s.PendingReports)
 	return clone
+}
+
+func (u UpdateState) clone() UpdateState {
+	out := u
+	if len(u.BlacklistedVersions) > 0 {
+		out.BlacklistedVersions = append([]string(nil), u.BlacklistedVersions...)
+	}
+	return out
+}
+
+func (u UpdateState) IsBlacklisted(version string) bool {
+	for _, v := range u.BlacklistedVersions {
+		if v == version {
+			return true
+		}
+	}
+	return false
 }
 
 // marshalJSON serializes the state to indented JSON bytes.

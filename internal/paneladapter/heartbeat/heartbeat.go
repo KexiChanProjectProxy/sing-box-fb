@@ -153,6 +153,7 @@ func (h *Heartbeat) SendHeartbeat(ctx context.Context) error {
 		PendingConfigurationRevision: pendingRev,
 		InboundStatuses:              inbounds,
 		Runtime:                      rtMetrics,
+		BlacklistedBinaryVersions:    st.Update.BlacklistedVersions,
 	}
 
 	if err := h.client.SendHeartbeat(ctx, hb); err != nil {
