@@ -974,6 +974,22 @@ func TestGetBox_NoInstance(t *testing.T) {
 	}
 }
 
+func TestReplaceInboundUsers_NoInstance(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "state.json")
+	store, _ := state.NewStore(statePath)
+	tracker := traffic.NewTracker(map[string]string{})
+	fakeClient := &fakeClient{}
+	logFactory := log.NewNOPFactory()
+
+	m, err := NewManager(fakeClient, store, tracker, logFactory)
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	if err := m.ReplaceInboundUsers("hy2-in", nil); err == nil {
+		t.Fatal("expected error when no box is running")
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Tests: Unsupported protocol in state update
 // ---------------------------------------------------------------------------

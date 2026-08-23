@@ -240,6 +240,17 @@ func (m *Manager) GetBox() *box.Box {
 	return m.instance
 }
 
+// ReplaceInboundUsers applies users on the currently running Box.
+// The user poller must not capture a Box pointer across recreate_instance.
+func (m *Manager) ReplaceInboundUsers(tag string, users []adapter.ManagedUser) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.instance == nil {
+		return E.New("no running box instance")
+	}
+	return m.instance.ReplaceInboundUsers(tag, users)
+}
+
 // Close shuts down the current Box and releases resources.
 func (m *Manager) Close() error {
 	m.mu.Lock()

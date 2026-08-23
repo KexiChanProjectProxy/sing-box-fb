@@ -176,9 +176,10 @@ func runAdapter() error {
 
 	startupConfig, pollIntervals := getStartupConfiguration(panelClient, ctx, logger)
 
-	// 9. Create user poller.
-	boxInstance := manager.GetBox()
-	poller := users.NewPoller(panelClient, store, boxInstance, logger)
+	// 9. Create user poller against the manager, not the bootstrap Box
+	// pointer. recreate_instance replaces Box; a captured pointer would
+	// apply users onto the closed instance while the live inbound stays empty.
+	poller := users.NewPoller(panelClient, store, manager, logger)
 
 	// 10. Create traffic reporter.
 	rep := reporter.NewReporter(
