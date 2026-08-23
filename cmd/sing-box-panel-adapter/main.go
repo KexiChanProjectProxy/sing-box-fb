@@ -215,11 +215,17 @@ func runAdapter() error {
 	// -----------------------------------------------------------------------
 	var wg sync.WaitGroup
 
+	managedInbounds := startupConfig.ManagedInbounds
+	if len(managedInbounds) == 0 {
+		managedInbounds = managedInboundsFromState(curState)
+	}
+
 	// Configuration polling goroutine.
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		runPeriodic(adapterCtx, "config-poll", time.Duration(pollIntervals.ConfigurationSeconds)*time.Second, logger, func(ctx context.Context) error {
+			prevRev := store.State().Config.Revision
 			if err := manager.PollConfiguration(ctx); err != nil {
 				return E.Cause(err, "poll configuration")
 			}
@@ -230,6 +236,16 @@ func runAdapter() error {
 			}
 			tracker.UpdateInboundMapping(m)
 			rep.SetConfigRevision(st.Config.Revision)
+			if st.Config.Revision != prevRev {
+				for _, mi := range managedInbounds {
+					if !contract.IsSupportedProtocol(mi.Protocol) {
+						continue
+					}
+					if err := poller.PollInbound(ctx, mi.InboundID, mi, st.Config.Revision); err != nil {
+						logger.Warn("user-poll/", mi.InboundID, " after config apply: ", err)
+					}
+				}
+			}
 			if err := tryBinaryUpdate(ctx, updater, manager, rep, store, logger); err != nil {
 				logger.Warn("binary update: ", err)
 				if manager.GetBox() == nil {
@@ -241,11 +257,6 @@ func runAdapter() error {
 			return nil
 		})
 	}()
-
-	managedInbounds := startupConfig.ManagedInbounds
-	if len(managedInbounds) == 0 {
-		managedInbounds = managedInboundsFromState(curState)
-	}
 	for _, managedInbound := range managedInbounds {
 		if !contract.IsSupportedProtocol(managedInbound.Protocol) {
 			continue
@@ -431,6 +442,9 @@ func runTokenRotationWithRetry(
 func runPeriodic(ctx context.Context, name string, interval time.Duration, logger log.ContextLogger, fn func(context.Context) error) {
 	if interval <= 0 {
 		interval = 30 * time.Second
+	}
+	if err := fn(ctx); err != nil {
+		logger.Warn(name, ": ", err)
 	}
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
