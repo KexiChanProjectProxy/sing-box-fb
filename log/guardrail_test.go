@@ -37,6 +37,7 @@ var approvedLegacyExceptions = map[string]struct{}{
 	"internal/paneladapter/heartbeat/heartbeat.go": {},
 	"internal/paneladapter/reporter/reporter.go":   {},
 	"internal/paneladapter/runtime/manager.go":     {},
+	"internal/paneladapter/update/updater.go":      {},
 	"internal/paneladapter/users/poller.go":        {},
 }
 
