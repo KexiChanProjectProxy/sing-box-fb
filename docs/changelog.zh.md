@@ -2,11 +2,19 @@
 icon: material/alert-decagram
 ---
 
+#### 1.14.0.12
+
+* 新增 [`clickhouse` 服务](/zh/configuration/service/clickhouse/)，通过 native 或 HTTP 将会话访问日志批量写入 ClickHouse，并支持出站 TLS
+* 新增 [`override_ip`](/zh/configuration/shared/dial/#override_ip) Dial 字段，可在任意出站上将已嗅探域名按 IPv4/IPv6 策略解析为 IP
+* 合入上游 [v1.14.0-rc.1](https://github.com/SagerNet/sing-box/releases/tag/v1.14.0-rc.1)
+
+#### 1.14.0.11
+
+* 启用 [`xlat464`](/zh/configuration/outbound/direct/#xlat464) 时保留双栈 DNS
+
 #### 1.14.0.10
 
 * 默认阻止原生 IPv6 目标绕过 [`xlat464`](/zh/configuration/outbound/direct/#xlat464) 配置的 NAT64 路径，并增加显式的 `allow_ipv6` 兼容选项
-* 新增 [`clickhouse` 服务](/zh/configuration/service/clickhouse/)，通过 native 或 HTTP 将会话访问日志批量写入 ClickHouse，并支持出站 TLS
-* 新增 [`override_ip`](/zh/configuration/shared/dial/#override_ip) Dial 字段，可在任意出站上将已嗅探域名按 IPv4/IPv6 策略解析为 IP
 
 #### 1.14.0.9
 
@@ -28,6 +36,48 @@ icon: material/alert-decagram
 #### 1.14.0.5
 
 * 添加 [`http-dynamic` 出站](/zh/configuration/outbound/http-dynamic/)，使用固定 HTTP Basic 用户名以及从已认证入站用户名和客户端源 IP 派生的每连接密码
+
+#### 1.14.0-rc.1
+
+* 修复和改进
+
+#### 1.13.19
+
+* 修复和改进
+
+#### 1.14.0-beta.16
+
+* 修复和改进
+
+#### 1.14.0-beta.15
+
+* 新增 `api` 命令 **1**
+* 添加 Taildrop 支持 **2**
+* 为 Tailscale 端点添加 `listen_port` 选项
+* 修复和改进
+
+**1**:
+
+新的 `sing-box api` 命令是 [API 服务](/zh/configuration/service/api/) 的 CLI 客户端，
+提供与图形客户端和 Dashboard 相同的操作。
+
+**2**:
+
+[Tailscale](/zh/configuration/endpoint/tailscale/) 端点现在支持
+[Taildrop](https://tailscale.com/kb/1106/taildrop) 文件共享。
+接收的文件保存在新的
+[`taildrop_directory`](/zh/configuration/endpoint/tailscale/#taildrop_directory)
+选项配置的目录中（默认 `Taildrop`）。
+可通过图形客户端、Dashboard 或新的 `sing-box api` 命令发送和管理文件。
+
+#### 1.14.0-beta.14
+
+* 修复和改进
+
+#### 1.13.18
+
+* 更新 naiveproxy 至 v150.0.7871.63-1
+* 修复和改进
 
 #### 1.14.0-alpha.24
 

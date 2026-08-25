@@ -2,11 +2,19 @@
 icon: material/alert-decagram
 ---
 
+#### 1.14.0.12
+
+* Add [`clickhouse` service](/configuration/service/clickhouse/) to batch-insert session access logs into ClickHouse over native or HTTP, with outbound TLS
+* Add [`override_ip`](/configuration/shared/dial/#override_ip) Dial Field to resolve a sniffed domain to IP with an IPv4/IPv6 strategy on any outbound
+* Integrate upstream [v1.14.0-rc.1](https://github.com/SagerNet/sing-box/releases/tag/v1.14.0-rc.1)
+
+#### 1.14.0.11
+
+* Preserve dual-stack DNS when [`xlat464`](/configuration/outbound/direct/#xlat464) is enabled
+
 #### 1.14.0.10
 
 * Prevent native IPv6 destinations from bypassing the configured [`xlat464`](/configuration/outbound/direct/#xlat464) NAT64 path by default; add an explicit `allow_ipv6` compatibility option
-* Add [`clickhouse` service](/configuration/service/clickhouse/) to batch-insert session access logs into ClickHouse over native or HTTP, with outbound TLS
-* Add [`override_ip`](/configuration/shared/dial/#override_ip) Dial Field to resolve a sniffed domain to IP with an IPv4/IPv6 strategy on any outbound
 
 #### 1.14.0.9
 
@@ -28,6 +36,50 @@ icon: material/alert-decagram
 #### 1.14.0.5
 
 * Add [`http-dynamic` outbound](/configuration/outbound/http-dynamic/) with a fixed HTTP Basic username and a per-connection password derived from the authenticated inbound user and client source IP
+
+#### 1.14.0-rc.1
+
+* Fixes and improvements
+
+#### 1.13.19
+
+* Fixes and improvements
+
+#### 1.14.0-beta.16
+
+* Fixes and improvements
+
+#### 1.14.0-beta.15
+
+* Add `api` command **1**
+* Add Taildrop support **2**
+* Add `listen_port` option to Tailscale endpoint
+* Fixes and improvements
+
+**1**:
+
+The new `sing-box api` command is a CLI client for the
+[API service](/configuration/service/api/), providing the same operations
+available in graphical clients and the Dashboard.
+
+**2**:
+
+[Tailscale](/configuration/endpoint/tailscale/) endpoints now support
+[Taildrop](https://tailscale.com/kb/1106/taildrop), the Tailscale file
+sharing feature. Received files are stored in the directory configured by
+the new
+[`taildrop_directory`](/configuration/endpoint/tailscale/#taildrop_directory)
+option (`Taildrop` by default). Files can be sent and managed through the
+graphical clients, the Dashboard, or the new `sing-box api` command.
+
+#### 1.14.0-beta.14
+
+* Fixes and improvements
+
+#### 1.13.18
+
+* Update naiveproxy to v150.0.7871.63-1
+* Fixes and improvements
 
 #### 1.14.0-beta.10
 

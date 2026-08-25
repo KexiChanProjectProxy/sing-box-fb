@@ -95,6 +95,8 @@ type InboundContext struct {
 	SourceMACAddress                    net.HardwareAddr
 	SourceHostname                      string
 	QueryType                           uint16
+	QueryClientSubnet                   netip.Prefix
+	QueryDNSSEC                         bool
 	FakeIP                              bool
 	PreMatch                            bool
 
@@ -109,6 +111,7 @@ type InboundContext struct {
 	DestinationPortMatch         bool
 	DidMatch                     bool
 	MatchedRuleSetTag            string
+	DeferredIPCIDRMatchGroups    uint8
 	IgnoreDestinationIPCIDRMatch bool
 }
 
@@ -125,6 +128,7 @@ func (c *InboundContext) ResetRuleMatchCache() {
 	c.DestinationPortMatch = false
 	c.DidMatch = false
 	c.MatchedRuleSetTag = ""
+	c.DeferredIPCIDRMatchGroups = 0
 }
 
 func (c *InboundContext) DNSResponseAddressesForMatch() []netip.Addr {
