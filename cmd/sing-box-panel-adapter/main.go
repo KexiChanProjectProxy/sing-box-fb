@@ -31,8 +31,8 @@ import (
 var configPath string
 
 const (
-	defaultTokenRotationInterval = 24 * time.Hour
-	tokenRotationRetryInterval   = 5 * time.Minute
+	defaultTokenRotationInterval = 90 * 24 * time.Hour
+	tokenRotationRetryInterval   = 30 * time.Second
 )
 
 var rootCommand = &cobra.Command{
