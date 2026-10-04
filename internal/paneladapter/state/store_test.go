@@ -8,6 +8,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/sagernet/sing-box/internal/paneladapter/contract"
 )
 
 // helper: create a temp dir and state file path, cleaned up after test.
@@ -469,7 +471,10 @@ func TestClone_DeepCopy(t *testing.T) {
 			"ib-1": {InboundID: "ib-1", Tag: "t1", UserCount: 3},
 		},
 		PendingReports: []PendingReport{
-			{IdempotencyKey: "k1", BodyHash: "h1", RetryCount: 1},
+			{IdempotencyKey: "k1", BodyHash: "h1", RetryCount: 1, Report: &contract.TrafficReport{
+				ConfigurationRevision: "r1",
+				Records:               []contract.TrafficRecord{{UserID: "u1", DownloadBytes: 4096}},
+			}},
 		},
 		Update: UpdateState{
 			PendingVersion:      "2.0.0",
@@ -483,6 +488,8 @@ func TestClone_DeepCopy(t *testing.T) {
 	clone.Inbounds["ib-1"] = InboundState{UserCount: 99}
 	clone.Inbounds["ib-2"] = InboundState{Tag: "new"}
 	clone.PendingReports[0].RetryCount = 5
+	clone.PendingReports[0].Report.ConfigurationRevision = "changed"
+	clone.PendingReports[0].Report.Records[0].DownloadBytes = 0
 	clone.PendingReports = append(clone.PendingReports, PendingReport{IdempotencyKey: "k2"})
 	clone.Update.BlacklistedVersions[0] = "changed"
 	clone.Update.BlacklistedVersions = append(clone.Update.BlacklistedVersions, "3.0.0")
@@ -504,6 +511,9 @@ func TestClone_DeepCopy(t *testing.T) {
 	}
 	if original.Update.BlacklistedVersions[0] != "1.9.0" || len(original.Update.BlacklistedVersions) != 1 {
 		t.Error("Clone shared Update.BlacklistedVersions with original")
+	}
+	if original.PendingReports[0].Report.ConfigurationRevision != "r1" || original.PendingReports[0].Report.Records[0].DownloadBytes != 4096 {
+		t.Error("Clone shared pending report body or records")
 	}
 }
 

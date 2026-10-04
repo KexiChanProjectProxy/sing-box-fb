@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sagernet/sing-box/internal/paneladapter/contract"
 	E "github.com/sagernet/sing/common/exceptions"
 )
 
@@ -56,11 +57,12 @@ type InboundState struct {
 // acknowledged by the panel. The IdempotencyKey is stable across
 // retries for the same report window so the panel can deduplicate.
 type PendingReport struct {
-	IdempotencyKey string    `json:"idempotency_key"`
-	BodyHash       string    `json:"body_hash"`
-	StartedAt      time.Time `json:"started_at"`
-	EndedAt        time.Time `json:"ended_at"`
-	RetryCount     int       `json:"retry_count"`
+	IdempotencyKey string                  `json:"idempotency_key"`
+	BodyHash       string                  `json:"body_hash"`
+	StartedAt      time.Time               `json:"started_at"`
+	EndedAt        time.Time               `json:"ended_at"`
+	RetryCount     int                     `json:"retry_count"`
+	Report         *contract.TrafficReport `json:"report,omitempty"`
 }
 
 // newState returns a State with sensible defaults.
@@ -87,6 +89,16 @@ func (s *State) Clone() *State {
 	}
 	clone.PendingReports = make([]PendingReport, len(s.PendingReports))
 	copy(clone.PendingReports, s.PendingReports)
+	for i, pending := range clone.PendingReports {
+		if pending.Report != nil {
+			report := *pending.Report
+			report.Records = append([]contract.TrafficRecord(nil), pending.Report.Records...)
+			if pending.Report.Records != nil && report.Records == nil {
+				report.Records = []contract.TrafficRecord{}
+			}
+			clone.PendingReports[i].Report = &report
+		}
+	}
 	return clone
 }
 

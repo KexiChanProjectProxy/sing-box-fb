@@ -113,7 +113,30 @@ func (r *Reporter) ReportNow(ctx context.Context) error {
 	if r.pendingReport != nil {
 		return r.retryPending(ctx)
 	}
+	if len(r.store.State().PendingReports) != 0 {
+		if err := r.Recovery(ctx); err != nil {
+			return err
+		}
+		if len(r.store.State().PendingReports) != 0 {
+			return E.New("pending traffic reports remain unacknowledged")
+		}
+	}
 	return r.stageAndSend(ctx)
+}
+
+// Flush journals the final live deltas even when an older report is still pending.
+// The durable reports can then be replayed after shutdown without losing bytes.
+func (r *Reporter) Flush(ctx context.Context) error {
+	var retryErr error
+	if r.pendingReport != nil {
+		retryErr = r.retryPending(ctx)
+	}
+	for _, pending := range r.store.State().PendingReports {
+		if pending.EndedAt.After(r.reportStartTime) {
+			r.reportStartTime = pending.EndedAt
+		}
+	}
+	return E.Errors(retryErr, r.stageAndSend(ctx))
 }
 
 // stageAndSend stages a new report from live counters, persists it,
@@ -141,6 +164,7 @@ func (r *Reporter) stageAndSend(ctx context.Context) error {
 			StartedAt:      r.reportStartTime,
 			EndedAt:        now,
 			RetryCount:     0,
+			Report:         report,
 		})
 	}); err != nil {
 		return E.Cause(err, "persist pending report")
@@ -227,17 +251,15 @@ func (r *Reporter) Recovery(ctx context.Context) error {
 
 	var remaining []state.PendingReport
 	for _, pr := range pendings {
-		// Try to get the staged report from the tracker.
-		// On restart, RestorePendingReport should have already been called
-		// before Recovery. If not, we reconstruct a minimal report.
-		pendingReport := r.tracker.PendingReport()
+		pendingReport := pr.Report
 		if pendingReport == nil {
-			pendingReport = &contract.TrafficReport{
-				StartedAt:             pr.StartedAt,
-				EndedAt:               pr.EndedAt,
-				ConfigurationRevision: r.configRevision,
-				Records:               []contract.TrafficRecord{},
-			}
+			pendingReport = r.tracker.PendingReport()
+		}
+		hash, hashErr := computeBodyHash(pendingReport)
+		if pendingReport == nil || hashErr != nil || hash != pr.BodyHash {
+			r.logger.ErrorContext(ctx, "reporter: original body unavailable or invalid for pending report ", pr.IdempotencyKey)
+			remaining = append(remaining, pr)
+			continue
 		}
 
 		err := r.client.ReportTraffic(ctx, pendingReport, pr.IdempotencyKey)
