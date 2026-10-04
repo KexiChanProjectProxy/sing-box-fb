@@ -350,14 +350,19 @@ func runAdapter() error {
 	// Wait for goroutines to finish (they respect context cancellation).
 	wg.Wait()
 
+	// Close connections before staging their last traffic deltas.
+	if err := manager.Close(); err != nil {
+		logger.Warn("close box: ", err)
+	}
+	flushCtx, flushCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	if err := rep.Flush(flushCtx); err != nil {
+		logger.Warn("flush traffic on shutdown: ", err)
+	}
+	flushCancel()
+
 	// Flush final state.
 	if err := store.Save(); err != nil {
 		logger.Warn("flush state on shutdown: ", err)
-	}
-
-	// Close the Box.
-	if err := manager.Close(); err != nil {
-		logger.Warn("close box: ", err)
 	}
 
 	// Force-exit after timeout to avoid hanging on stubborn connections.

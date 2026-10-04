@@ -1,9 +1,12 @@
 package reporter
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -581,6 +584,56 @@ func TestReportNow_RetryCountIncrements(t *testing.T) {
 // Recovery tests
 // ---------------------------------------------------------------------------
 
+func TestRecovery_RestartPreservesExactReportBody(t *testing.T) {
+	path := testStatePath(t)
+	store, err := state.NewStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tracker := newTestTracker()
+	local, peer := net.Pipe()
+	tracked := tracker.TrackConnection(local, "ss-in", "user-1")
+	go func() { defer peer.Close(); _, _ = io.CopyN(io.Discard, peer, 4096) }()
+	if _, err := tracked.Write(make([]byte, 4096)); err != nil {
+		t.Fatal(err)
+	}
+	_ = tracked.Close()
+	var firstBody, secondBody []byte
+	var firstKey, secondKey string
+	server := mockPanelServer(t, func(w http.ResponseWriter, req *http.Request) {
+		body, _ := io.ReadAll(req.Body)
+		if firstBody == nil {
+			firstBody, firstKey = body, req.Header.Get("Idempotency-Key")
+			write503Response(w)
+			return
+		}
+		secondBody, secondKey = body, req.Header.Get("Idempotency-Key")
+		w.WriteHeader(http.StatusCreated)
+	})
+	c := newTestClient(t, server.URL)
+	before := NewReporter(c, store, tracker, testNodeID, WithConfigRevision("original-revision"))
+	if err := before.ReportNow(context.Background()); err == nil {
+		t.Fatal("expected report failure")
+	}
+	reopened, err := state.NewStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after := NewReporter(c, reopened, newTestTracker(), testNodeID, WithConfigRevision("new-revision"))
+	if err := after.Recovery(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(firstBody, secondBody) {
+		t.Fatalf("restart changed pending report body: before=%s after=%s", firstBody, secondBody)
+	}
+	if firstKey != secondKey {
+		t.Fatal("restart changed idempotency key")
+	}
+	if len(reopened.State().PendingReports) != 0 {
+		t.Fatal("accepted recovery left pending report")
+	}
+}
+
 // TestRecovery_NoPendingReports verifies Recovery is a no-op when
 // there are no pending reports.
 func TestRecovery_NoPendingReports(t *testing.T) {
@@ -613,7 +666,18 @@ func TestRecovery_PendingReportsSurviveRestart(t *testing.T) {
 
 	startedAt := time.Date(2025, 1, 15, 10, 0, 0, 0, time.UTC)
 	endedAt := time.Date(2025, 1, 15, 10, 30, 0, 0, time.UTC)
-	bodyHash := "abcdef1234567890"
+	pendingReport := &contract.TrafficReport{
+		StartedAt:             startedAt,
+		EndedAt:               endedAt,
+		ConfigurationRevision: "rev-1",
+		Records: []contract.TrafficRecord{
+			{InboundID: "inbound-1", UserID: "user-1", UploadBytes: 1000, DownloadBytes: 2000},
+		},
+	}
+	bodyHash, err := computeBodyHash(pendingReport)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	st := store.State().Clone()
 	st.PendingReports = []state.PendingReport{
@@ -623,22 +687,13 @@ func TestRecovery_PendingReportsSurviveRestart(t *testing.T) {
 			StartedAt:      startedAt,
 			EndedAt:        endedAt,
 			RetryCount:     1,
+			Report:         pendingReport,
 		},
 	}
 	store.SetState(st)
 	if err := store.Save(); err != nil {
 		t.Fatalf("save state: %v", err)
 	}
-
-	pendingReport := &contract.TrafficReport{
-		StartedAt:             startedAt,
-		EndedAt:               endedAt,
-		ConfigurationRevision: "rev-1",
-		Records: []contract.TrafficRecord{
-			{InboundID: "inbound-1", UserID: "user-1", UploadBytes: 1000, DownloadBytes: 2000},
-		},
-	}
-	tracker.RestorePendingReport(pendingReport)
 
 	var capturedKey string
 	handler := func(w http.ResponseWriter, r *http.Request) {
@@ -650,7 +705,7 @@ func TestRecovery_PendingReportsSurviveRestart(t *testing.T) {
 
 	r := NewReporter(c, store, tracker, testNodeID)
 
-	err := r.Recovery(context.Background())
+	err = r.Recovery(context.Background())
 	if err != nil {
 		t.Fatalf("Recovery: %v", err)
 	}
@@ -674,7 +729,18 @@ func TestRecovery_ConflictKeepsPending(t *testing.T) {
 
 	startedAt := time.Date(2025, 1, 15, 10, 0, 0, 0, time.UTC)
 	endedAt := time.Date(2025, 1, 15, 10, 30, 0, 0, time.UTC)
-	bodyHash := "abcdef1234567890"
+	pendingReport := &contract.TrafficReport{
+		StartedAt:             startedAt,
+		EndedAt:               endedAt,
+		ConfigurationRevision: "rev-1",
+		Records: []contract.TrafficRecord{
+			{InboundID: "inbound-1", UserID: "user-1", UploadBytes: 1000, DownloadBytes: 2000},
+		},
+	}
+	bodyHash, err := computeBodyHash(pendingReport)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	st := store.State().Clone()
 	st.PendingReports = []state.PendingReport{
@@ -684,22 +750,13 @@ func TestRecovery_ConflictKeepsPending(t *testing.T) {
 			StartedAt:      startedAt,
 			EndedAt:        endedAt,
 			RetryCount:     0,
+			Report:         pendingReport,
 		},
 	}
 	store.SetState(st)
 	if err := store.Save(); err != nil {
 		t.Fatalf("save state: %v", err)
 	}
-
-	pendingReport := &contract.TrafficReport{
-		StartedAt:             startedAt,
-		EndedAt:               endedAt,
-		ConfigurationRevision: "rev-1",
-		Records: []contract.TrafficRecord{
-			{InboundID: "inbound-1", UserID: "user-1", UploadBytes: 1000, DownloadBytes: 2000},
-		},
-	}
-	tracker.RestorePendingReport(pendingReport)
 
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		writeConflictResponse(w)
@@ -709,7 +766,7 @@ func TestRecovery_ConflictKeepsPending(t *testing.T) {
 
 	r := NewReporter(c, store, tracker, testNodeID)
 
-	err := r.Recovery(context.Background())
+	err = r.Recovery(context.Background())
 	if err != nil {
 		t.Fatalf("Recovery: %v", err)
 	}
@@ -728,7 +785,18 @@ func TestRecovery_RetryableErrorKeepsPending(t *testing.T) {
 
 	startedAt := time.Date(2025, 1, 15, 10, 0, 0, 0, time.UTC)
 	endedAt := time.Date(2025, 1, 15, 10, 30, 0, 0, time.UTC)
-	bodyHash := "abcdef1234567890"
+	pendingReport := &contract.TrafficReport{
+		StartedAt:             startedAt,
+		EndedAt:               endedAt,
+		ConfigurationRevision: "rev-1",
+		Records: []contract.TrafficRecord{
+			{InboundID: "inbound-1", UserID: "user-1", UploadBytes: 1000, DownloadBytes: 2000},
+		},
+	}
+	bodyHash, err := computeBodyHash(pendingReport)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	st := store.State().Clone()
 	st.PendingReports = []state.PendingReport{
@@ -738,22 +806,13 @@ func TestRecovery_RetryableErrorKeepsPending(t *testing.T) {
 			StartedAt:      startedAt,
 			EndedAt:        endedAt,
 			RetryCount:     2,
+			Report:         pendingReport,
 		},
 	}
 	store.SetState(st)
 	if err := store.Save(); err != nil {
 		t.Fatalf("save state: %v", err)
 	}
-
-	pendingReport := &contract.TrafficReport{
-		StartedAt:             startedAt,
-		EndedAt:               endedAt,
-		ConfigurationRevision: "rev-1",
-		Records: []contract.TrafficRecord{
-			{InboundID: "inbound-1", UserID: "user-1", UploadBytes: 1000, DownloadBytes: 2000},
-		},
-	}
-	tracker.RestorePendingReport(pendingReport)
 
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		write503Response(w)
@@ -763,7 +822,7 @@ func TestRecovery_RetryableErrorKeepsPending(t *testing.T) {
 
 	r := NewReporter(c, store, tracker, testNodeID)
 
-	err := r.Recovery(context.Background())
+	err = r.Recovery(context.Background())
 	if err != nil {
 		t.Fatalf("Recovery: %v", err)
 	}
@@ -811,6 +870,7 @@ func TestNoDoubleCountingOnRestart(t *testing.T) {
 			StartedAt:      startedAt,
 			EndedAt:        endedAt,
 			RetryCount:     0,
+			Report:         pendingReport,
 		},
 	}
 	store.SetState(st)
@@ -820,7 +880,6 @@ func TestNoDoubleCountingOnRestart(t *testing.T) {
 
 	// Restore the pending report into the tracker (simulates restart recovery setup).
 	// RestorePendingReport sets staged state but does NOT add to live counters.
-	tracker.RestorePendingReport(pendingReport)
 
 	// Verify live counters are empty (no double-counting).
 	// StageForReport reads from live counters, which are empty.
@@ -850,60 +909,119 @@ func TestNoDoubleCountingOnRestart(t *testing.T) {
 // multiple pending reports.
 func TestRecovery_MultiplePendingReports(t *testing.T) {
 	store := newTestStore(t)
-	tracker := newTestTracker()
-
-	startedAt1 := time.Date(2025, 1, 15, 9, 0, 0, 0, time.UTC)
-	startedAt2 := time.Date(2025, 1, 15, 10, 0, 0, 0, time.UTC)
-	endedAt := time.Date(2025, 1, 15, 10, 30, 0, 0, time.UTC)
-
+	startedAt := time.Date(2025, 1, 15, 9, 0, 0, 0, time.UTC)
 	st := store.State().Clone()
-	st.PendingReports = []state.PendingReport{
-		{
-			IdempotencyKey: "tr_node-42_2025-01-15T09:00:00Z_aaaa0000",
-			BodyHash:       "aaaa0000abcd",
-			StartedAt:      startedAt1,
-			EndedAt:        endedAt,
-			RetryCount:     0,
-		},
-		{
-			IdempotencyKey: "tr_node-42_2025-01-15T10:00:00Z_bbbb0000",
-			BodyHash:       "bbbb0000abcd",
-			StartedAt:      startedAt2,
-			EndedAt:        endedAt,
-			RetryCount:     1,
-		},
+	for i := 0; i < 2; i++ {
+		report := &contract.TrafficReport{
+			StartedAt:             startedAt.Add(time.Duration(i) * time.Hour),
+			EndedAt:               startedAt.Add(time.Duration(i+1) * time.Hour),
+			ConfigurationRevision: "rev-1",
+			Records:               []contract.TrafficRecord{{InboundID: "inbound-1", UserID: "user-1", DownloadBytes: int64(i+1) * 1000}},
+		}
+		hash, err := computeBodyHash(report)
+		if err != nil {
+			t.Fatal(err)
+		}
+		st.PendingReports = append(st.PendingReports, state.PendingReport{
+			IdempotencyKey: makeIdempotencyKey(testNodeID, report.StartedAt, hash),
+			BodyHash:       hash, StartedAt: report.StartedAt, EndedAt: report.EndedAt, Report: report,
+		})
 	}
 	store.SetState(st)
 	if err := store.Save(); err != nil {
-		t.Fatalf("save state: %v", err)
+		t.Fatal(err)
 	}
-
-	pendingReport := &contract.TrafficReport{
-		StartedAt:             startedAt2,
-		EndedAt:               endedAt,
-		ConfigurationRevision: "rev-1",
-		Records: []contract.TrafficRecord{
-			{InboundID: "inbound-1", UserID: "user-1", UploadBytes: 500, DownloadBytes: 1000},
-		},
+	var total int64
+	server := mockPanelServer(t, func(w http.ResponseWriter, req *http.Request) {
+		var report contract.TrafficReport
+		if err := json.NewDecoder(req.Body).Decode(&report); err != nil {
+			t.Error(err)
+		}
+		for _, record := range report.Records {
+			total += record.DownloadBytes
+		}
+		w.WriteHeader(http.StatusCreated)
+	})
+	r := NewReporter(newTestClient(t, server.URL), store, newTestTracker(), testNodeID)
+	if err := r.Recovery(context.Background()); err != nil {
+		t.Fatal(err)
 	}
-	tracker.RestorePendingReport(pendingReport)
-
-	callCount := 0
-	handler := func(w http.ResponseWriter, r *http.Request) {
-		callCount++
-		w.WriteHeader(http.StatusAccepted)
+	if total != 3000 || len(store.State().PendingReports) != 0 {
+		t.Fatalf("multiple recovery lost traffic: total=%d remaining=%d", total, len(store.State().PendingReports))
 	}
-	server := mockPanelServer(t, handler)
-	c := newTestClient(t, server.URL)
+}
 
-	r := NewReporter(c, store, tracker, testNodeID)
+func TestRecovery_LegacyMetadataNeverSendsEmptyReport(t *testing.T) {
+	store := newTestStore(t)
+	st := store.State().Clone()
+	st.PendingReports = []state.PendingReport{{IdempotencyKey: "legacy", BodyHash: "missing", StartedAt: time.Now()}}
+	store.SetState(st)
+	called := false
+	server := mockPanelServer(t, func(w http.ResponseWriter, req *http.Request) { called = true; w.WriteHeader(http.StatusCreated) })
+	r := NewReporter(newTestClient(t, server.URL), store, newTestTracker(), testNodeID)
+	if err := r.ReportNow(context.Background()); err == nil {
+		t.Fatal("legacy missing body must block reporting")
+	}
+	if called || len(store.State().PendingReports) != 1 {
+		t.Fatal("legacy report was discarded or sent with fabricated body")
+	}
+}
 
-	err := r.Recovery(context.Background())
+func TestFlush_JournalsLiveBytesWhileOlderReportFails(t *testing.T) {
+	path := testStatePath(t)
+	store, err := state.NewStore(path)
 	if err != nil {
-		t.Fatalf("Recovery: %v", err)
+		t.Fatal(err)
 	}
-
-	if callCount < 1 {
-		t.Error("expected at least one HTTP call during recovery")
+	tracker := newTestTracker()
+	addBytes := func() {
+		local, peer := net.Pipe()
+		tracked := tracker.TrackConnection(local, "ss-in", "user-1")
+		go func() { defer peer.Close(); _, _ = io.CopyN(io.Discard, peer, 4096) }()
+		if _, err := tracked.Write(make([]byte, 4096)); err != nil {
+			t.Fatal(err)
+		}
+		_ = tracked.Close()
+	}
+	failing := true
+	var total int64
+	server := mockPanelServer(t, func(w http.ResponseWriter, req *http.Request) {
+		if failing {
+			write503Response(w)
+			return
+		}
+		var report contract.TrafficReport
+		if err := json.NewDecoder(req.Body).Decode(&report); err != nil {
+			t.Error(err)
+		}
+		for _, record := range report.Records {
+			total += record.DownloadBytes
+		}
+		w.WriteHeader(http.StatusCreated)
+	})
+	c := newTestClient(t, server.URL)
+	r := NewReporter(c, store, tracker, testNodeID)
+	addBytes()
+	if err := r.ReportNow(context.Background()); err == nil {
+		t.Fatal("expected failed initial report")
+	}
+	addBytes()
+	if err := r.Flush(context.Background()); err == nil {
+		t.Fatal("expected failed flush")
+	}
+	reopened, err := state.NewStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reopened.State().PendingReports) != 2 {
+		t.Fatal("flush failed to journal final bytes")
+	}
+	failing = false
+	restored := NewReporter(c, reopened, newTestTracker(), testNodeID)
+	if err := restored.Recovery(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if total != 8192 {
+		t.Fatalf("expected exact 8192 recovered bytes, got %d", total)
 	}
 }
