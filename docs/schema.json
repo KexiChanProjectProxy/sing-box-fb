@@ -6805,9 +6805,6 @@
               "type": "string",
               "enum": [
                 "bbr",
-                "bbr_standard",
-                "bbr2",
-                "bbr2_variant",
                 "cubic",
                 "reno"
               ]
@@ -11560,6 +11557,9 @@
             },
             "device_name": {
               "type": "string"
+            },
+            "ephemeral": {
+              "type": "boolean"
             },
             "api_detour": {
               "type": "string"
