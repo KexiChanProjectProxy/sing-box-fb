@@ -2,9 +2,25 @@
 icon: material/alert-decagram
 ---
 
+#### 1.14.0.17
+
+* 新增 [`direct.source_bind`](/zh/configuration/outbound/direct/#source_bind)：按客户端源 IP 选择出站绑定地址，支持按源 CIDR 配置规则，未匹配的客户端从地址池中随机分配一个地址，并在其持续于 `ttl` 内新建连接期间保持不变
+* 新增 [`direct.non_local_bind`](/zh/configuration/outbound/direct/#non_local_bind)：在 Linux 与 FreeBSD 上允许绑定未分配给本地接口的地址，例如路由到本机的 IPv6 前缀内的地址
+
+#### 1.14.0.16
+
+* 升级 sing-quic 至上游 v0.7.0：Brutal 按设计补偿丢包；[`naive`](/zh/configuration/inbound/naive/#quic_congestion_control) 的各 BBR 变体改为映射到同一 BBR 实现的配置档
+* [`hysteria2`](/zh/configuration/outbound/hysteria2/) 与 [`anytls`](/zh/configuration/outbound/anytls/) 成员为 [`loadbalance`](/zh/configuration/outbound/loadbalance/#sorter) 的 sorter 上报传输层统计，包括服务端视角的数据；该能力经协商启用，不影响旧版客户端与服务端
+* 合并上游 sing-anytls v0.0.13，包括拆分大于 64 KiB 的写入（此前会损坏会话）
+* 新增 [`loadbalance.sorter`](/zh/configuration/outbound/loadbalance/#sorter)：按延迟、RTT、RTT 抖动、丢包率与吞吐的加权组合排序成员，不再仅按延迟
+* 弃用 [`loadbalance.weighted_delay`](/zh/configuration/outbound/loadbalance/#weighted_delay)：将其转换为等价的 sorter，窗口由采样个数改为固定的 5 分钟时间窗
+* 新增 `loadbalance.score` 调试日志，记录各成员评分及每个关键词的贡献；新增 `loadbalance.sorter.coarse_interval` 与 `loadbalance.sorter.unsupported` 警告
+
 #### 1.14.0.15
 
 * [`loadbalance`](/zh/configuration/outbound/loadbalance/#连接级故障转移) 握手失败时在同一连接上按最近延迟依次改试其余主出站、再改试备用出站
+* [`empty_pool_action: error`](/zh/configuration/outbound/loadbalance/#empty_pool_action) 在候选池为空时不再立即失败，改为依次尝试全部已配置成员
+* 新增 `loadbalance.failover` 与 `loadbalance.failover.exhausted` 日志事件，记录首选、实际使用与已尝试的成员
 
 #### 1.14.0.14
 

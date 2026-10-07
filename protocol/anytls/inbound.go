@@ -67,6 +67,7 @@ func NewInbound(ctx context.Context, router adapter.Router, logger log.Structure
 		PaddingScheme: paddingScheme,
 		Handler:       (*inboundHandler)(inbound),
 		Logger:        logger,
+		StatsProvider: serverStats,
 	})
 	if err != nil {
 		return nil, err

@@ -2,9 +2,30 @@
 icon: material/alert-decagram
 ---
 
+#### 1.14.0.18
+
+* Add [`cloudflare-warp`](/configuration/outbound/cloudflare-warp/) outbound: connect to Cloudflare WARP over MASQUE (HTTP/3 CONNECT-IP) with TCP and UDP, using static credentials or a device registered automatically and kept in the cache file
+* Add `sing-box generate warp-registration` to register a WARP device and print a ready-to-use outbound
+
+#### 1.14.0.17
+
+* Add [`direct.source_bind`](/configuration/outbound/direct/#source_bind): choose the outbound bind address by client source IP, with source CIDR rules and a random per-client address from a pool that is kept while the client keeps connecting within `ttl`
+* Add [`direct.non_local_bind`](/configuration/outbound/direct/#non_local_bind): bind to addresses not assigned to a local interface, such as addresses inside a routed IPv6 prefix, on Linux and FreeBSD
+
+#### 1.14.0.16
+
+* Upgrade sing-quic to upstream v0.7.0: Brutal now compensates for loss as designed, and the [`naive`](/configuration/inbound/naive/#quic_congestion_control) BBR variants map onto one BBR implementation's profiles
+* Report transport statistics from [`hysteria2`](/configuration/outbound/hysteria2/) and [`anytls`](/configuration/outbound/anytls/) members for the [`loadbalance`](/configuration/outbound/loadbalance/#sorter) sorter, including the server's view of the connection, negotiated so that older clients and servers are unaffected
+* Merge upstream sing-anytls v0.0.13, including splitting writes larger than 64 KiB, which previously corrupted the session
+* Add [`loadbalance.sorter`](/configuration/outbound/loadbalance/#sorter): rank members by a weighted combination of latency, RTT, RTT variance, loss rate and delivery rate instead of latency alone
+* Deprecate [`loadbalance.weighted_delay`](/configuration/outbound/loadbalance/#weighted_delay); it is translated to an equivalent sorter, and its window is now five minutes of samples rather than a sample count
+* Log `loadbalance.score` events at debug level with each member's score and per-keyword contribution, and warn on `loadbalance.sorter.coarse_interval` and `loadbalance.sorter.unsupported`
+
 #### 1.14.0.15
 
 * Fail over [`loadbalance`](/configuration/outbound/loadbalance/#connection-fail-over) connections whose handshake fails to the remaining primary outbounds, then backup outbounds, ordered by last measured latency
+* Change [`empty_pool_action: error`](/configuration/outbound/loadbalance/#empty_pool_action) to walk every configured member instead of failing immediately on an empty candidate pool
+* Log `loadbalance.failover` and `loadbalance.failover.exhausted` events with the selected, used, and tried members
 
 #### 1.14.0.14
 

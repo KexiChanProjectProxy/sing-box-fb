@@ -843,6 +843,9 @@
         },
         "prefer_domain": {
           "type": "boolean"
+        },
+        "override_ip": {
+          "$ref": "#/$defs/OverrideIP"
         }
       },
       "additionalProperties": false
@@ -2006,6 +2009,9 @@
             "prefer_domain": {
               "type": "boolean"
             },
+            "override_ip": {
+              "$ref": "#/$defs/OverrideIP"
+            },
             "prefer_go": {
               "type": "boolean"
             },
@@ -2168,6 +2174,9 @@
             },
             "prefer_domain": {
               "type": "boolean"
+            },
+            "override_ip": {
+              "$ref": "#/$defs/OverrideIP"
             },
             "server": {
               "type": "string"
@@ -2350,6 +2359,9 @@
             "prefer_domain": {
               "type": "boolean"
             },
+            "override_ip": {
+              "$ref": "#/$defs/OverrideIP"
+            },
             "server": {
               "type": "string"
             },
@@ -2487,6 +2499,9 @@
             "prefer_domain": {
               "type": "boolean"
             },
+            "override_ip": {
+              "$ref": "#/$defs/OverrideIP"
+            },
             "prefer_go": {
               "type": "boolean"
             },
@@ -2619,6 +2634,9 @@
             },
             "prefer_domain": {
               "type": "boolean"
+            },
+            "override_ip": {
+              "$ref": "#/$defs/OverrideIP"
             },
             "prefer_go": {
               "type": "boolean"
@@ -2814,6 +2832,9 @@
             "prefer_domain": {
               "type": "boolean"
             },
+            "override_ip": {
+              "$ref": "#/$defs/OverrideIP"
+            },
             "server": {
               "type": "string"
             },
@@ -2987,6 +3008,9 @@
             "prefer_domain": {
               "type": "boolean"
             },
+            "override_ip": {
+              "$ref": "#/$defs/OverrideIP"
+            },
             "server": {
               "type": "string"
             },
@@ -3111,6 +3135,9 @@
             },
             "prefer_domain": {
               "type": "boolean"
+            },
+            "override_ip": {
+              "$ref": "#/$defs/OverrideIP"
             },
             "server": {
               "type": "string"
@@ -3239,6 +3266,9 @@
             },
             "prefer_domain": {
               "type": "boolean"
+            },
+            "override_ip": {
+              "$ref": "#/$defs/OverrideIP"
             },
             "server": {
               "type": "string"
@@ -3398,6 +3428,9 @@
         },
         "prefer_domain": {
           "type": "boolean"
+        },
+        "override_ip": {
+          "$ref": "#/$defs/OverrideIP"
         }
       },
       "additionalProperties": false
@@ -3570,6 +3603,9 @@
             },
             "prefer_domain": {
               "type": "boolean"
+            },
+            "override_ip": {
+              "$ref": "#/$defs/OverrideIP"
             },
             "system": {
               "type": "boolean"
@@ -3850,6 +3886,9 @@
             },
             "prefer_domain": {
               "type": "boolean"
+            },
+            "override_ip": {
+              "$ref": "#/$defs/OverrideIP"
             },
             "server": {
               "type": "string"
@@ -4542,6 +4581,9 @@
             "prefer_domain": {
               "type": "boolean"
             },
+            "override_ip": {
+              "$ref": "#/$defs/OverrideIP"
+            },
             "state_directory": {
               "type": "string"
             },
@@ -4829,6 +4871,9 @@
             },
             "prefer_domain": {
               "type": "boolean"
+            },
+            "override_ip": {
+              "$ref": "#/$defs/OverrideIP"
             }
           },
           "required": [
@@ -4988,6 +5033,9 @@
         },
         "prefer_domain": {
           "type": "boolean"
+        },
+        "override_ip": {
+          "$ref": "#/$defs/OverrideIP"
         },
         "idle_timeout": {
           "$ref": "#/$defs/Duration"
@@ -5164,6 +5212,9 @@
             },
             "prefer_domain": {
               "type": "boolean"
+            },
+            "override_ip": {
+              "$ref": "#/$defs/OverrideIP"
             },
             "idle_timeout": {
               "$ref": "#/$defs/Duration"
@@ -5665,6 +5716,33 @@
             6
           ]
         },
+        "prefer_ip_version": {
+          "type": "string",
+          "enum": [
+            "v4",
+            "v6",
+            "dual"
+          ]
+        },
+        "fallback_timeout": {
+          "$ref": "#/$defs/Duration"
+        },
+        "ipv6_api": {
+          "type": "string"
+        },
+        "listen_ports": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          ]
+        },
         "port_mapping": {
           "$ref": "#/$defs/Hysteria2RealmPortMapping"
         },
@@ -5708,6 +5786,33 @@
             0,
             4,
             6
+          ]
+        },
+        "prefer_ip_version": {
+          "type": "string",
+          "enum": [
+            "v4",
+            "v6",
+            "dual"
+          ]
+        },
+        "fallback_timeout": {
+          "$ref": "#/$defs/Duration"
+        },
+        "ipv6_api": {
+          "type": "string"
+        },
+        "listen_ports": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
           ]
         },
         "port_mapping": {
@@ -8446,6 +8551,9 @@
         },
         "prefer_domain": {
           "type": "boolean"
+        },
+        "override_ip": {
+          "$ref": "#/$defs/OverrideIP"
         }
       },
       "additionalProperties": false
@@ -8742,6 +8850,25 @@
       },
       "additionalProperties": false
     },
+    "LoadBalanceWeightedDelayOptions": {
+      "type": "object",
+      "properties": {
+        "window": {
+          "type": "integer"
+        },
+        "window_weight": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "last_weight": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        }
+      },
+      "additionalProperties": false
+    },
     "LogOptions": {
       "type": "object",
       "properties": {
@@ -8897,6 +9024,9 @@
         },
         "prefer_domain": {
           "type": "boolean"
+        },
+        "override_ip": {
+          "$ref": "#/$defs/OverrideIP"
         }
       },
       "additionalProperties": false
@@ -11134,6 +11264,9 @@
             "prefer_domain": {
               "type": "boolean"
             },
+            "override_ip": {
+              "$ref": "#/$defs/OverrideIP"
+            },
             "server": {
               "type": "string"
             },
@@ -11195,6 +11328,9 @@
             },
             "prefer_domain": {
               "type": "boolean"
+            },
+            "override_ip": {
+              "$ref": "#/$defs/OverrideIP"
             }
           },
           "required": [
@@ -11222,6 +11358,237 @@
             },
             "iproute2_rule_index": {
               "type": "integer"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "cloudflare-warp"
+            },
+            "tag": {
+              "type": "string"
+            },
+            "detour": {
+              "type": "string",
+              "x-tag-reference": "outbound"
+            },
+            "bind_interface": {
+              "type": "string"
+            },
+            "inet4_bind_address": {
+              "type": "string"
+            },
+            "inet6_bind_address": {
+              "type": "string"
+            },
+            "bind_address_no_port": {
+              "type": "boolean"
+            },
+            "protect_path": {
+              "type": "string"
+            },
+            "routing_mark": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 4294967295
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "reuse_addr": {
+              "type": "boolean"
+            },
+            "netns": {
+              "type": "string",
+              "x-tag-reference": "network_namespace"
+            },
+            "connect_timeout": {
+              "$ref": "#/$defs/Duration"
+            },
+            "tcp_fast_open": {
+              "type": "boolean"
+            },
+            "tcp_multi_path": {
+              "type": "boolean"
+            },
+            "disable_tcp_keep_alive": {
+              "type": "boolean"
+            },
+            "tcp_keep_alive": {
+              "$ref": "#/$defs/Duration"
+            },
+            "tcp_keep_alive_interval": {
+              "$ref": "#/$defs/Duration"
+            },
+            "udp_fragment": {
+              "type": "boolean"
+            },
+            "domain_resolver": {
+              "$ref": "#/$defs/DomainResolver"
+            },
+            "network_strategy": {
+              "type": "string",
+              "enum": [
+                "default",
+                "fallback",
+                "hybrid"
+              ]
+            },
+            "network_type": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/InterfaceType"
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/InterfaceType"
+                  }
+                }
+              ]
+            },
+            "fallback_network_type": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/InterfaceType"
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/InterfaceType"
+                  }
+                }
+              ]
+            },
+            "fallback_delay": {
+              "$ref": "#/$defs/Duration"
+            },
+            "prefer_domain": {
+              "type": "boolean"
+            },
+            "override_ip": {
+              "$ref": "#/$defs/OverrideIP"
+            },
+            "server": {
+              "type": "string"
+            },
+            "server_port": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 65535
+            },
+            "tls": {
+              "$ref": "#/$defs/OutboundTLSOptions"
+            },
+            "idle_timeout": {
+              "$ref": "#/$defs/Duration"
+            },
+            "keep_alive_period": {
+              "$ref": "#/$defs/Duration"
+            },
+            "stream_receive_window": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "connection_receive_window": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "max_concurrent_streams": {
+              "type": "integer"
+            },
+            "initial_packet_size": {
+              "type": "integer"
+            },
+            "disable_path_mtu_discovery": {
+              "type": "boolean"
+            },
+            "private_key": {
+              "type": "string"
+            },
+            "address": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              ]
+            },
+            "endpoint_public_key": {
+              "type": "string"
+            },
+            "device_id": {
+              "type": "string"
+            },
+            "access_token": {
+              "type": "string"
+            },
+            "license": {
+              "type": "string"
+            },
+            "access_jwt": {
+              "type": "string"
+            },
+            "device_name": {
+              "type": "string"
+            },
+            "api_detour": {
+              "type": "string"
+            },
+            "network": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "tcp",
+                    "udp"
+                  ]
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "tcp",
+                      "udp"
+                    ]
+                  }
+                }
+              ]
+            },
+            "mtu": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967295
             }
           },
           "required": [
@@ -11340,8 +11707,17 @@
             "prefer_domain": {
               "type": "boolean"
             },
+            "override_ip": {
+              "$ref": "#/$defs/OverrideIP"
+            },
             "xlat464": {
               "$ref": "#/$defs/Xlat464Options"
+            },
+            "non_local_bind": {
+              "type": "boolean"
+            },
+            "source_bind": {
+              "$ref": "#/$defs/SourceBindOptions"
             }
           },
           "required": [
@@ -11459,6 +11835,9 @@
             },
             "prefer_domain": {
               "type": "boolean"
+            },
+            "override_ip": {
+              "$ref": "#/$defs/OverrideIP"
             },
             "server": {
               "type": "string"
@@ -11596,6 +11975,9 @@
             },
             "prefer_domain": {
               "type": "boolean"
+            },
+            "override_ip": {
+              "$ref": "#/$defs/OverrideIP"
             },
             "server": {
               "type": "string"
@@ -11737,6 +12119,9 @@
             "prefer_domain": {
               "type": "boolean"
             },
+            "override_ip": {
+              "$ref": "#/$defs/OverrideIP"
+            },
             "server": {
               "type": "string"
             },
@@ -11873,6 +12258,9 @@
             },
             "prefer_domain": {
               "type": "boolean"
+            },
+            "override_ip": {
+              "$ref": "#/$defs/OverrideIP"
             },
             "server": {
               "type": "string"
@@ -12125,6 +12513,9 @@
             "prefer_domain": {
               "type": "boolean"
             },
+            "override_ip": {
+              "$ref": "#/$defs/OverrideIP"
+            },
             "server": {
               "type": "string"
             },
@@ -12297,13 +12688,15 @@
             "primary_outbounds": {
               "type": "array",
               "items": {
-                "type": "string"
+                "type": "string",
+                "x-tag-reference": "outbound"
               }
             },
             "backup_outbounds": {
               "type": "array",
               "items": {
-                "type": "string"
+                "type": "string",
+                "x-tag-reference": "outbound"
               }
             },
             "url": {
@@ -12323,6 +12716,15 @@
               "minimum": 0,
               "maximum": 65535
             },
+            "sorter": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "number"
+              }
+            },
+            "weighted_delay": {
+              "$ref": "#/$defs/LoadBalanceWeightedDelayOptions"
+            },
             "top_n": {
               "$ref": "#/$defs/LoadBalanceTopNOptions"
             },
@@ -12340,6 +12742,9 @@
             },
             "prefer_domain": {
               "type": "boolean"
+            },
+            "override_ip": {
+              "$ref": "#/$defs/OverrideIP"
             }
           },
           "required": [
@@ -12457,6 +12862,9 @@
             },
             "prefer_domain": {
               "type": "boolean"
+            },
+            "override_ip": {
+              "$ref": "#/$defs/OverrideIP"
             },
             "server": {
               "type": "string"
@@ -12657,6 +13065,9 @@
             "prefer_domain": {
               "type": "boolean"
             },
+            "override_ip": {
+              "$ref": "#/$defs/OverrideIP"
+            },
             "server": {
               "type": "string"
             },
@@ -12735,6 +13146,9 @@
             },
             "prefer_domain": {
               "type": "boolean"
+            },
+            "override_ip": {
+              "$ref": "#/$defs/OverrideIP"
             }
           },
           "required": [
@@ -12852,6 +13266,9 @@
             },
             "prefer_domain": {
               "type": "boolean"
+            },
+            "override_ip": {
+              "$ref": "#/$defs/OverrideIP"
             },
             "server": {
               "type": "string"
@@ -13059,6 +13476,9 @@
             "prefer_domain": {
               "type": "boolean"
             },
+            "override_ip": {
+              "$ref": "#/$defs/OverrideIP"
+            },
             "server": {
               "type": "string"
             },
@@ -13202,6 +13622,9 @@
                 },
                 "prefer_domain": {
                   "type": "boolean"
+                },
+                "override_ip": {
+                  "$ref": "#/$defs/OverrideIP"
                 },
                 "server": {
                   "type": "string"
@@ -13373,6 +13796,9 @@
                 "prefer_domain": {
                   "type": "boolean"
                 },
+                "override_ip": {
+                  "$ref": "#/$defs/OverrideIP"
+                },
                 "server": {
                   "type": "string"
                 },
@@ -13538,6 +13964,9 @@
             },
             "prefer_domain": {
               "type": "boolean"
+            },
+            "override_ip": {
+              "$ref": "#/$defs/OverrideIP"
             },
             "server": {
               "type": "string"
@@ -13723,6 +14152,9 @@
             },
             "prefer_domain": {
               "type": "boolean"
+            },
+            "override_ip": {
+              "$ref": "#/$defs/OverrideIP"
             },
             "server": {
               "type": "string"
@@ -13942,6 +14374,9 @@
             "prefer_domain": {
               "type": "boolean"
             },
+            "override_ip": {
+              "$ref": "#/$defs/OverrideIP"
+            },
             "executable_path": {
               "type": "string"
             },
@@ -14076,6 +14511,9 @@
             },
             "prefer_domain": {
               "type": "boolean"
+            },
+            "override_ip": {
+              "$ref": "#/$defs/OverrideIP"
             },
             "server": {
               "type": "string"
@@ -14235,6 +14673,9 @@
             "prefer_domain": {
               "type": "boolean"
             },
+            "override_ip": {
+              "$ref": "#/$defs/OverrideIP"
+            },
             "server": {
               "type": "string"
             },
@@ -14375,6 +14816,9 @@
             },
             "prefer_domain": {
               "type": "boolean"
+            },
+            "override_ip": {
+              "$ref": "#/$defs/OverrideIP"
             }
           },
           "required": [
@@ -14492,6 +14936,9 @@
             },
             "prefer_domain": {
               "type": "boolean"
+            },
+            "override_ip": {
+              "$ref": "#/$defs/OverrideIP"
             },
             "server": {
               "type": "string"
@@ -14656,6 +15103,9 @@
             },
             "prefer_domain": {
               "type": "boolean"
+            },
+            "override_ip": {
+              "$ref": "#/$defs/OverrideIP"
             },
             "server": {
               "type": "string"
@@ -15068,6 +15518,52 @@
         }
       },
       "additionalProperties": false
+    },
+    "OverrideIP": {
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "prefer_ipv4",
+            "prefer_ipv6",
+            "ipv4_only",
+            "ipv6_only"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "server": {
+              "type": "string",
+              "x-tag-reference": "dns_server"
+            },
+            "timeout": {
+              "$ref": "#/$defs/Duration"
+            },
+            "strategy": {
+              "$ref": "#/$defs/DomainStrategy"
+            },
+            "disable_cache": {
+              "type": "boolean"
+            },
+            "disable_optimistic_cache": {
+              "type": "boolean"
+            },
+            "rewrite_ttl": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            "client_subnet": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "strategy"
+          ],
+          "additionalProperties": false
+        }
+      ]
     },
     "RouteOptions": {
       "type": "object",
@@ -15968,6 +16464,9 @@
             },
             "prefer_domain": {
               "type": "boolean"
+            },
+            "override_ip": {
+              "$ref": "#/$defs/OverrideIP"
             }
           },
           "required": [
@@ -16793,6 +17292,9 @@
                         "prefer_domain": {
                           "type": "boolean"
                         },
+                        "override_ip": {
+                          "$ref": "#/$defs/OverrideIP"
+                        },
                         "idle_timeout": {
                           "$ref": "#/$defs/Duration"
                         },
@@ -16977,6 +17479,9 @@
                           },
                           "prefer_domain": {
                             "type": "boolean"
+                          },
+                          "override_ip": {
+                            "$ref": "#/$defs/OverrideIP"
                           },
                           "idle_timeout": {
                             "$ref": "#/$defs/Duration"
@@ -17631,6 +18136,9 @@
             "prefer_domain": {
               "type": "boolean"
             },
+            "override_ip": {
+              "$ref": "#/$defs/OverrideIP"
+            },
             "server": {
               "type": "string"
             },
@@ -17926,6 +18434,9 @@
         },
         "prefer_domain": {
           "type": "boolean"
+        },
+        "override_ip": {
+          "$ref": "#/$defs/OverrideIP"
         }
       },
       "additionalProperties": false
@@ -17982,6 +18493,92 @@
         },
         "userkey": {
           "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "SourceBindOptions": {
+      "type": "object",
+      "properties": {
+        "inet4_addresses": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          ]
+        },
+        "inet6_addresses": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          ]
+        },
+        "ttl": {
+          "$ref": "#/$defs/Duration"
+        },
+        "rules": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SourceBindRule"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "SourceBindRule": {
+      "type": "object",
+      "properties": {
+        "source_ip_cidr": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          ]
+        },
+        "inet4_addresses": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          ]
+        },
+        "inet6_addresses": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          ]
         }
       },
       "additionalProperties": false
