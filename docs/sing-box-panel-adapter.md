@@ -140,6 +140,9 @@ When the initial user fetch for a managed inbound fails, the adapter applies
 - The inbound's `user_load_status` is set to `empty_initial_load`.
 - The sing-box config template has its managed inbound user arrays stripped to
   `[]` before Box creation, ensuring no stale or placeholder users are active.
+- The template is decoded with sing-box's configuration loader, so fields
+  added upstream — `direct` `source_bind`, `loadbalance` `sorter`, Hysteria2
+  `realm` prefer/fallback — are kept.
 
 For subsequent failures after a successful load, the adapter keeps the last
 applied user set and reports `stale` in heartbeats.

@@ -22,7 +22,6 @@ import (
 	"github.com/sagernet/sing-box/option"
 
 	E "github.com/sagernet/sing/common/exceptions"
-	commonjson "github.com/sagernet/sing/common/json"
 )
 
 // ---------------------------------------------------------------------------
@@ -288,8 +287,8 @@ func (m *Manager) applyConfigLocked(ctx context.Context, cfg *contract.Configura
 		return E.Cause(err, "inject clickhouse service")
 	}
 	// Unmarshal into option.Options.
-	var options option.Options
-	if err := commonjson.UnmarshalContext(include.Context(ctx), stripped, &options); err != nil {
+	options, err := option.UnmarshalContext(include.Context(ctx), stripped)
+	if err != nil {
 		return E.Cause(err, "unmarshal sing-box config template")
 	}
 
