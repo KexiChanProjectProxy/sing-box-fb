@@ -100,8 +100,6 @@ func TestV2bXFieldNamesRejected(t *testing.T) {
 		t.Run(v.name, func(t *testing.T) {
 			payload := `{"` + v.jsonTag + `":"value","panel_base_url":"https://x.com","node_id":"n","node_token":"t","state_path":"/tmp/s"}`
 			var cfg Config
-			decoder := json.NewDecoder(nil)
-			_ = decoder // just proving DisallowUnknownFields is used in Load
 			err := json.Unmarshal([]byte(payload), &cfg)
 			// Standard json.Unmarshal does not reject unknown fields;
 			// our Load function uses DisallowUnknownFields, tested in TestUnknownJSONFieldsRejected.
