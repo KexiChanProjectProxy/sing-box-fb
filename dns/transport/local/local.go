@@ -75,6 +75,7 @@ func (t *Transport) Start(stage adapter.StartStage) error {
 				if err == nil {
 					t.resolved = resolvedResolver
 				} else {
+					_ = resolvedResolver.Close()
 					t.logger.WarnEvent("dns.resolved.initialize.error", "initialize resolved resolver", log.Err(err))
 				}
 			}

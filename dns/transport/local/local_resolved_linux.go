@@ -99,7 +99,9 @@ func NewResolvedResolver(ctx context.Context, logger log.StructuredLogger) (Reso
 }
 
 func (t *DBusResolvedResolver) Start() error {
-	t.updateStatus(t.ctx)
+	if err := t.updateStatus(t.ctx); err != nil {
+		return err
+	}
 	t.interfaceCallback = t.interfaceMonitor.RegisterCallback(t.updateDefaultInterface)
 	err := t.systemBus.BusObject().AddMatchSignal(
 		"org.freedesktop.DBus",
@@ -279,18 +281,18 @@ func (t *DBusResolvedResolver) postUpdateStatus() {
 	}()
 }
 
-func (t *DBusResolvedResolver) updateStatus(ctx context.Context) {
+func (t *DBusResolvedResolver) updateStatus(ctx context.Context) error {
 	t.updateRunAccess.Lock()
 	defer t.updateRunAccess.Unlock()
 	if t.closed || ctx.Err() != nil {
-		return
+		return E.New("resolved resolver is closed or initialization canceled")
 	}
 	serverSet, err := t.checkResolved(ctx)
 	if t.closed || ctx.Err() != nil {
 		if serverSet != nil {
 			_ = serverSet.Close()
 		}
-		return
+		return E.New("resolved resolver is closed or initialization canceled")
 	}
 	oldServerSet := t.savedServerSet.Swap(serverSet)
 	if oldServerSet != nil {
@@ -304,10 +306,11 @@ func (t *DBusResolvedResolver) updateStatus(ctx context.Context) {
 		if oldServerSet != nil {
 			t.logger.DebugEvent("dns.resolved.gone", "systemd-resolved service is gone")
 		}
-		return
+		return err
 	} else if oldServerSet == nil {
 		t.logger.DebugEvent("dns.resolved.active", "using systemd-resolved service as resolver")
 	}
+	return nil
 }
 
 func (t *DBusResolvedResolver) exchangeServerSet(ctx context.Context, message *mDNS.Msg, serverSet *resolvedServerSet) (*mDNS.Msg, error) {
