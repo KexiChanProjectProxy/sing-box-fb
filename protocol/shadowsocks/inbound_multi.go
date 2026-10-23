@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"os"
+	"strconv"
 	"sync"
 	"time"
 
@@ -39,7 +40,7 @@ type MultiInbound struct {
 	router   adapter.ConnectionRouterEx
 	logger   log.StructuredLogger
 	listener *listener.Listener
-	service  shadowsocks.MultiService[int]
+	service  shadowsocks.MultiService[string]
 	users    []option.ShadowsocksUser
 	tracker  adapter.SSMTracker
 	userLock sync.RWMutex
@@ -63,9 +64,9 @@ func newMultiInbound(ctx context.Context, router adapter.Router, logger log.Stru
 	} else {
 		udpTimeout = C.UDPTimeout
 	}
-	var service shadowsocks.MultiService[int]
+	var service shadowsocks.MultiService[string]
 	if common.Contains(shadowaead_2022.List, options.Method) {
-		service, err = shadowaead_2022.NewMultiServiceWithPassword[int](
+		service, err = shadowaead_2022.NewMultiServiceWithPassword[string](
 			options.Method,
 			options.Password,
 			int64(udpTimeout.Seconds()),
@@ -73,7 +74,7 @@ func newMultiInbound(ctx context.Context, router adapter.Router, logger log.Stru
 			ntp.TimeFuncFromContext(ctx),
 		)
 	} else if common.Contains(shadowaead.List, options.Method) {
-		service, err = shadowaead.NewMultiService[int](
+		service, err = shadowaead.NewMultiService[string](
 			options.Method,
 			int64(udpTimeout.Seconds()),
 			adapter.NewLegacyUpstreamHandler(adapter.InboundContext{}, inbound.newConnection, inbound.newPacketConnection, inbound),
@@ -85,8 +86,11 @@ func newMultiInbound(ctx context.Context, router adapter.Router, logger log.Stru
 		return nil, err
 	}
 	if len(options.Users) > 0 {
-		err = service.UpdateUsersWithPasswords(common.MapIndexed(options.Users, func(index int, user option.ShadowsocksUser) int {
-			return index
+		err = service.UpdateUsersWithPasswords(common.MapIndexed(options.Users, func(index int, user option.ShadowsocksUser) string {
+			if user.Name != "" {
+				return user.Name
+			}
+			return strconv.Itoa(index)
 		}), common.Map(options.Users, func(user option.ShadowsocksUser) string {
 			return user.Password
 		}))
@@ -127,6 +131,7 @@ func (h *MultiInbound) SetTracker(tracker adapter.SSMTracker) {
 // It implements adapter.ManagedUserInbound.
 func (h *MultiInbound) ReplaceUsers(users []adapter.ManagedUser) error {
 	names := make([]string, len(users))
+	identities := make([]string, len(users))
 	passwords := make([]string, len(users))
 	for i, u := range users {
 		if u.Name != "" {
@@ -134,12 +139,14 @@ func (h *MultiInbound) ReplaceUsers(users []adapter.ManagedUser) error {
 		} else {
 			names[i] = u.UserID
 		}
+		identities[i] = u.UserID
+		if identities[i] == "" {
+			identities[i] = names[i]
+		}
 		passwords[i] = u.Credential.Password
 	}
 	if h.service != nil {
-		err := h.service.UpdateUsersWithPasswords(common.MapIndexed(names, func(index int, _ string) int {
-			return index
-		}), passwords)
+		err := h.service.UpdateUsersWithPasswords(identities, passwords)
 		if err != nil {
 			return err
 		}
@@ -155,9 +162,7 @@ func (h *MultiInbound) ReplaceUsers(users []adapter.ManagedUser) error {
 }
 
 func (h *MultiInbound) UpdateUsers(users []string, uPSKs []string) error {
-	err := h.service.UpdateUsersWithPasswords(common.MapIndexed(users, func(index int, user string) int {
-		return index
-	}), uPSKs)
+	err := h.service.UpdateUsersWithPasswords(users, uPSKs)
 	if err != nil {
 		return err
 	}
@@ -188,17 +193,10 @@ func (h *MultiInbound) NewPacket(buffer *buf.Buffer, source M.Socksaddr) {
 }
 
 func (h *MultiInbound) newConnection(ctx context.Context, conn net.Conn, metadata adapter.InboundContext) error {
-	userIndex, loaded := auth.UserFromContext[int](ctx)
+	user, loaded := auth.UserFromContext[string](ctx)
 	if !loaded {
 		return os.ErrInvalid
 	}
-	h.userLock.RLock()
-	userCount := len(h.users)
-	var user string
-	if userIndex < userCount {
-		user = h.users[userIndex].Name
-	}
-	h.userLock.RUnlock()
 	if user != "" {
 		metadata.User = user
 	}
@@ -216,17 +214,10 @@ func (h *MultiInbound) newConnection(ctx context.Context, conn net.Conn, metadat
 }
 
 func (h *MultiInbound) newPacketConnection(ctx context.Context, conn N.PacketConn, metadata adapter.InboundContext) error {
-	userIndex, loaded := auth.UserFromContext[int](ctx)
+	user, loaded := auth.UserFromContext[string](ctx)
 	if !loaded {
 		return os.ErrInvalid
 	}
-	h.userLock.RLock()
-	userCount := len(h.users)
-	var user string
-	if userIndex < userCount {
-		user = h.users[userIndex].Name
-	}
-	h.userLock.RUnlock()
 	if user != "" {
 		metadata.User = user
 	}

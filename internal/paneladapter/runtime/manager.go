@@ -490,8 +490,11 @@ func stripManagedInboundUsers(cfg *contract.ConfigurationResponse) (json.RawMess
 
 		managedInbound, managed := managedTags[tag]
 		if managed {
-			if managedInbound.UserApplyPolicy == contract.ApplyOnUserNone || managedInbound.Protocol == contract.ProtocolShadowsocks {
+			if managedInbound.UserApplyPolicy == contract.ApplyOnUserNone || managedInbound.UserApplyPolicy == "" {
 				delete(ib, "managed")
+				delete(ib, "users")
+			} else if managedInbound.Protocol == contract.ProtocolShadowsocks {
+				ib["managed"] = json.RawMessage(`true`)
 				delete(ib, "users")
 			} else if _, hasUsers := ib["users"]; hasUsers {
 				ib["users"] = emptyUsers
