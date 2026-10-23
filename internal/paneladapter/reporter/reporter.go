@@ -72,6 +72,7 @@ type Reporter struct {
 	logger          log.ContextLogger
 	configRevision  string
 	reportStartTime time.Time
+	now             func() time.Time
 
 	// pendingReport holds the last report that was persisted but not yet
 	// accepted by the panel. It is kept in memory so retries can re-send
@@ -91,6 +92,7 @@ func NewReporter(c *client.Client, store *state.Store, tracker *traffic.Tracker,
 		nodeID:    nodeID,
 		skipEmpty: true,
 		logger:    log.NewNOPFactory().Logger(),
+		now:       time.Now,
 	}
 	r.reportStartTime = time.Now().UTC()
 	for _, opt := range opts {
@@ -110,6 +112,11 @@ func (r *Reporter) SetConfigRevision(rev string) {
 // it is re-sent with the same idempotency key. Otherwise, new traffic is
 // staged from the tracker, persisted, and sent.
 func (r *Reporter) ReportNow(ctx context.Context) error {
+	if r.pendingReport != nil && invalidWindowReason(r.pendingReport) != "" {
+		if err := r.Recovery(ctx); err != nil {
+			return err
+		}
+	}
 	if r.pendingReport != nil {
 		return r.retryPending(ctx)
 	}
@@ -128,6 +135,11 @@ func (r *Reporter) ReportNow(ctx context.Context) error {
 // The durable reports can then be replayed after shutdown without losing bytes.
 func (r *Reporter) Flush(ctx context.Context) error {
 	var retryErr error
+	if r.pendingReport != nil && invalidWindowReason(r.pendingReport) != "" {
+		if err := r.Recovery(ctx); err != nil {
+			return err
+		}
+	}
 	if r.pendingReport != nil {
 		retryErr = r.retryPending(ctx)
 	}
@@ -142,7 +154,7 @@ func (r *Reporter) Flush(ctx context.Context) error {
 // stageAndSend stages a new report from live counters, persists it,
 // and sends it.
 func (r *Reporter) stageAndSend(ctx context.Context) error {
-	now := time.Now().UTC()
+	now := r.now().UTC()
 	report := r.tracker.StageForReport(r.reportStartTime, now, r.configRevision)
 
 	if r.skipEmpty && len(report.Records) == 0 {
@@ -156,16 +168,27 @@ func (r *Reporter) stageAndSend(ctx context.Context) error {
 	}
 
 	idempotencyKey := makeIdempotencyKey(r.nodeID, r.reportStartTime, bodyHash)
+	pending := state.PendingReport{
+		IdempotencyKey: idempotencyKey, BodyHash: bodyHash,
+		StartedAt: r.reportStartTime, EndedAt: now, Report: report,
+	}
+	if reason := invalidWindowReason(report); reason != "" {
+		if err := r.store.UpdateAndSave(func(st *state.State) {
+			st.QuarantinedReports = append(st.QuarantinedReports, state.QuarantinedReport{
+				PendingReport: pending, Reason: reason, QuarantinedAt: now,
+			})
+		}); err != nil {
+			return E.Cause(err, "preserve traffic with invalid window")
+		}
+		r.tracker.ConfirmJournaled()
+		r.tracker.ResetLiveCountersWhenJournaled()
+		r.reportStartTime = now
+		r.logger.ErrorContext(ctx, "reporter: quarantined traffic with invalid window; operator review required: ", reason)
+		return E.New("traffic window quarantined: ", reason)
+	}
 
 	if err := r.store.UpdateAndSave(func(st *state.State) {
-		st.PendingReports = append(st.PendingReports, state.PendingReport{
-			IdempotencyKey: idempotencyKey,
-			BodyHash:       bodyHash,
-			StartedAt:      r.reportStartTime,
-			EndedAt:        now,
-			RetryCount:     0,
-			Report:         report,
-		})
+		st.PendingReports = append(st.PendingReports, pending)
 	}); err != nil {
 		return E.Cause(err, "persist pending report")
 	}
@@ -215,7 +238,7 @@ func (r *Reporter) sendAndFinalize(ctx context.Context, report *contract.Traffic
 		r.pendingKey = ""
 		r.pendingHash = ""
 
-		r.reportStartTime = time.Now().UTC()
+		r.reportStartTime = r.now().UTC()
 		return nil
 	}
 
@@ -250,6 +273,7 @@ func (r *Reporter) Recovery(ctx context.Context) error {
 	copy(pendings, st.PendingReports)
 
 	var remaining []state.PendingReport
+	var quarantined []state.QuarantinedReport
 	for _, pr := range pendings {
 		pendingReport := pr.Report
 		if pendingReport == nil {
@@ -259,6 +283,13 @@ func (r *Reporter) Recovery(ctx context.Context) error {
 		if pendingReport == nil || hashErr != nil || hash != pr.BodyHash {
 			r.logger.ErrorContext(ctx, "reporter: original body unavailable or invalid for pending report ", pr.IdempotencyKey)
 			remaining = append(remaining, pr)
+			continue
+		}
+		if reason := invalidWindowReason(pendingReport); reason != "" {
+			quarantined = append(quarantined, state.QuarantinedReport{
+				PendingReport: pr, Reason: reason, QuarantinedAt: r.now().UTC(),
+			})
+			r.logger.ErrorContext(ctx, "reporter: quarantining invalid pending traffic window; operator review required: ", reason)
 			continue
 		}
 
@@ -291,11 +322,28 @@ func (r *Reporter) Recovery(ctx context.Context) error {
 
 	if err := r.store.UpdateAndSave(func(st *state.State) {
 		st.PendingReports = remaining
+		st.QuarantinedReports = append(st.QuarantinedReports, quarantined...)
 	}); err != nil {
 		return E.Cause(err, "save state after recovery")
 	}
-
+	for _, entry := range quarantined {
+		if entry.IdempotencyKey == r.pendingKey {
+			r.pendingReport, r.pendingKey, r.pendingHash = nil, "", ""
+		}
+	}
 	return nil
+}
+
+// Match the panel's positive, at-most-five-minute wire window contract. Never
+// invent timestamps to make historical bytes billable after a clock jump.
+func invalidWindowReason(report *contract.TrafficReport) string {
+	if !report.EndedAt.After(report.StartedAt) {
+		return "non_positive_window"
+	}
+	if report.EndedAt.Sub(report.StartedAt) > 5*time.Minute {
+		return "window_exceeds_five_minutes"
+	}
+	return ""
 }
 
 // ---------------------------------------------------------------------------

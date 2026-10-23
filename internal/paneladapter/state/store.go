@@ -20,11 +20,12 @@ const CurrentVersion = 1
 // State holds the durable adapter state persisted to disk.
 // It MUST NOT contain bearer tokens, user passwords, or TLS secrets.
 type State struct {
-	Version        int                     `json:"version"`
-	Config         ConfigState             `json:"config"`
-	Inbounds       map[string]InboundState `json:"inbounds"`
-	PendingReports []PendingReport         `json:"pending_reports,omitempty"`
-	Update         UpdateState             `json:"update,omitempty"`
+	Version            int                     `json:"version"`
+	Config             ConfigState             `json:"config"`
+	Inbounds           map[string]InboundState `json:"inbounds"`
+	PendingReports     []PendingReport         `json:"pending_reports,omitempty"`
+	QuarantinedReports []QuarantinedReport     `json:"quarantined_reports,omitempty"`
+	Update             UpdateState             `json:"update,omitempty"`
 }
 
 // UpdateState tracks a pending binary replace and blacklisted versions.
@@ -65,6 +66,14 @@ type PendingReport struct {
 	Report         *contract.TrafficReport `json:"report,omitempty"`
 }
 
+// QuarantinedReport preserves an unsendable original report for operator review.
+// Its timestamps, bytes, body hash and idempotency key are never rewritten.
+type QuarantinedReport struct {
+	PendingReport
+	Reason        string    `json:"reason"`
+	QuarantinedAt time.Time `json:"quarantined_at"`
+}
+
 // newState returns a State with sensible defaults.
 func newState() *State {
 	return &State{
@@ -97,6 +106,14 @@ func (s *State) Clone() *State {
 				report.Records = []contract.TrafficRecord{}
 			}
 			clone.PendingReports[i].Report = &report
+		}
+	}
+	clone.QuarantinedReports = append([]QuarantinedReport(nil), s.QuarantinedReports...)
+	for i, quarantined := range clone.QuarantinedReports {
+		if quarantined.Report != nil {
+			report := *quarantined.Report
+			report.Records = append([]contract.TrafficRecord(nil), quarantined.Report.Records...)
+			clone.QuarantinedReports[i].Report = &report
 		}
 	}
 	return clone
@@ -220,9 +237,9 @@ func (s *Store) UpdateAndSave(update func(*State)) error {
 
 	next := s.state.Clone()
 	update(next)
-	s.state = next
 
 	if s.path == "" {
+		s.state = next
 		return nil
 	}
 
@@ -231,12 +248,14 @@ func (s *Store) UpdateAndSave(update func(*State)) error {
 		return err
 	}
 	if currentHash == s.lastHash {
+		s.state = next
 		return nil
 	}
 	if err := s.writeState(next); err != nil {
 		return err
 	}
 	s.lastHash = currentHash
+	s.state = next
 	return nil
 }
 
