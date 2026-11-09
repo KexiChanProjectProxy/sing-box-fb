@@ -2,6 +2,12 @@
 icon: material/alert-decagram
 ---
 
+#### 1.14.2.2
+
+* 修复配置重载后 [`anytls`](/zh/configuration/inbound/anytls/) 客户端在池化会话上失败的问题：关闭入站时现在会关闭空闲会话，此前这些会话仍回应心跳，但其上的每个流都会失败。带有流的会话在最后一个流结束时关闭，最长等待 10 分钟
+* 热重载 `anytls` 用户时，现在会关闭已移除用户和已修改密码的现有会话
+* 升级 sing-anytls（原为 v0.0.14-kexi.1），包含客户端立即发送设置帧、按延迟选择会话以及内置的 `client_metadata`
+
 #### 1.14.2.1
 
 * 新增 [`cloudflare-warp.ephemeral`](/zh/configuration/outbound/cloudflare-warp/#ephemeral)：每次启动注册一个仅保存在内存中的设备，并在退出时从 Cloudflare 删除，适用于没有缓存文件的无状态节点

@@ -2,6 +2,12 @@
 icon: material/alert-decagram
 ---
 
+#### 1.14.2.2
+
+* Fix [`anytls`](/configuration/inbound/anytls/) clients failing on pooled sessions after a configuration reload: closing the inbound now closes idle sessions, which previously kept answering heartbeats while every stream on them failed. Sessions with streams close when their last stream ends, or after 10 minutes
+* Hot-reloading `anytls` users now closes the existing sessions of removed users and of changed passwords
+* Upgrade sing-anytls from v0.0.14-kexi.1, including immediate client settings frames, latency-aware session selection and a built-in `client_metadata`
+
 #### 1.14.2.1
 
 * Add [`cloudflare-warp.ephemeral`](/configuration/outbound/cloudflare-warp/#ephemeral): register a device at every start, keep it only in memory, and delete it from Cloudflare on shutdown, for stateless nodes without a cache file
