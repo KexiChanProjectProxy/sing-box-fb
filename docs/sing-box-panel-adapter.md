@@ -122,6 +122,10 @@ mapped to Box recreation (closing the old `box.Box` and creating a new one).
 It does **not** re-exec the OS process. This mapping is documented and tested
 to avoid confusion with `sing-box run` SIGHUP behavior.
 
+Box recreation ends the connections of the old instance.
+Closing the box closes every outbound connection it dialed, so transfers in progress are interrupted.
+AnyTLS inbounds also close their idle sessions, so clients stop pooling them and reconnect to the new instance.
+
 ### User change strategy
 
 | Strategy | Behavior |
@@ -129,6 +133,8 @@ to avoid confusion with `sing-box run` SIGHUP behavior.
 | `hot_reload_users` | Apply user snapshots without restarting the Box. This is the **only** supported user apply strategy in v1. |
 | `restart_process` | Not supported for user changes in v1. Reports `apply_failed` if encountered. |
 | `recreate_instance` | Not supported for user changes in v1. Reports `apply_failed` if encountered. |
+
+For AnyTLS inbounds, `hot_reload_users` also closes the existing sessions of removed users and of changed passwords at once, including any streams on them.
 
 ## Fail-closed behavior
 
