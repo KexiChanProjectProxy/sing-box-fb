@@ -26,3 +26,5 @@ AGENTS.md
 /mock-panel-server
 /reporter.test
 /sing-box-panel-adapter
+
+/.worktrees/

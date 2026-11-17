@@ -16,8 +16,10 @@ import (
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing/common"
 	"github.com/sagernet/sing/common/auth"
+	E "github.com/sagernet/sing/common/exceptions"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
+	"github.com/sagernet/sing/service"
 
 	anytls "github.com/anytls/sing-anytls"
 	"github.com/anytls/sing-anytls/padding"
@@ -38,6 +40,15 @@ type Inbound struct {
 	service      *anytls.Service
 	userLock     sync.RWMutex
 	managedNames map[string]string // userID -> display name
+	fallbackAddr M.Socksaddr
+
+	// dnsRouter is set when clients may send DNS queries inside their
+	// session, and dnsServer when they go to one server rather than through
+	// the DNS rules.
+	dnsRouter           adapter.DNSRouter
+	dnsTransportManager adapter.DNSTransportManager
+	dnsServerTag        string
+	dnsServer           adapter.DNSTransport
 }
 
 func NewInbound(ctx context.Context, router adapter.Router, logger log.StructuredLogger, tag string, options option.AnyTLSInboundOptions) (adapter.Inbound, error) {
@@ -60,19 +71,41 @@ func NewInbound(ctx context.Context, router adapter.Router, logger log.Structure
 		paddingScheme = []byte(strings.Join(options.PaddingScheme, "\n"))
 	}
 
-	service, err := anytls.NewService(anytls.ServiceConfig{
+	var fallbackHandler N.TCPConnectionHandlerEx
+	if options.Fallback != nil && options.Fallback.Server != "" {
+		inbound.fallbackAddr = options.Fallback.Build()
+		if !inbound.fallbackAddr.IsValid() {
+			return nil, E.New("invalid fallback address: ", inbound.fallbackAddr)
+		}
+		fallbackHandler = adapter.NewUpstreamContextHandler(inbound.fallbackConnection, nil)
+	}
+
+	var dnsHandler func(ctx context.Context, request []byte) ([]byte, error)
+	if options.DNS != nil && options.DNS.Enabled {
+		inbound.dnsRouter = service.FromContext[adapter.DNSRouter](ctx)
+		inbound.dnsTransportManager = service.FromContext[adapter.DNSTransportManager](ctx)
+		if inbound.dnsRouter == nil || inbound.dnsTransportManager == nil {
+			return nil, E.New("dns: missing DNS router")
+		}
+		inbound.dnsServerTag = options.DNS.Server
+		dnsHandler = inbound.exchangeDNS
+	}
+
+	anytlsService, err := anytls.NewService(anytls.ServiceConfig{
 		Users: common.Map(options.Users, func(it option.AnyTLSUser) anytls.User {
 			return anytls.User(it)
 		}),
-		PaddingScheme: paddingScheme,
-		Handler:       (*inboundHandler)(inbound),
-		Logger:        logger,
-		StatsProvider: serverStats,
+		PaddingScheme:   paddingScheme,
+		Handler:         (*inboundHandler)(inbound),
+		FallbackHandler: fallbackHandler,
+		Logger:          logger,
+		StatsProvider:   serverStats,
+		DNSHandler:      dnsHandler,
 	})
 	if err != nil {
 		return nil, err
 	}
-	inbound.service = service
+	inbound.service = anytlsService
 	inbound.listener = listener.New(listener.Options{
 		Context:           ctx,
 		Logger:            logger,
@@ -84,6 +117,15 @@ func NewInbound(ctx context.Context, router adapter.Router, logger log.Structure
 }
 
 func (h *Inbound) Start(stage adapter.StartStage) error {
+	if stage == adapter.StartStateInitialize && h.dnsServerTag != "" {
+		// DNS servers are all created by now, and no connection can arrive
+		// before the listeners start, so the field is set before any read.
+		transport, loaded := h.dnsTransportManager.Transport(h.dnsServerTag)
+		if !loaded {
+			return E.New("dns: DNS server not found: ", h.dnsServerTag)
+		}
+		h.dnsServer = transport
+	}
 	if stage != adapter.StartStateStart {
 		return nil
 	}
@@ -142,6 +184,16 @@ func (h *Inbound) NewConnection(ctx context.Context, conn net.Conn, metadata ada
 		adapter.LogConnectionError(h.logger, ctx, err, metadata.Source)
 
 	}
+}
+
+func (h *Inbound) fallbackConnection(ctx context.Context, conn net.Conn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) {
+	metadata.Inbound = h.Tag()
+	metadata.InboundType = h.Type()
+	//nolint:staticcheck
+	metadata.InboundDetour = h.listener.ListenOptions().Detour
+	metadata.Destination = h.fallbackAddr
+	adapter.LogInboundConnection(h.logger, ctx, metadata)
+	h.router.RouteConnectionEx(ctx, conn, metadata, onClose)
 }
 
 type inboundHandler Inbound

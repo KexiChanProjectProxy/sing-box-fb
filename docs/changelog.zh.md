@@ -2,6 +2,51 @@
 icon: material/alert-decagram
 ---
 
+#### 1.14.2.11
+
+* AnyTLS 入站新增 [`anytls.dns`](/zh/configuration/inbound/anytls/#dns)：应答客户端在会话内以独立帧（而非流）发送的 DNS 查询。查询发往 `dns.server` 指定的 DNS 服务器并与 sing-box 自身的查询共享缓存，或经过 DNS 规则。服务器只向支持此功能的客户端声明，其他 AnyTLS 客户端不受影响
+* 新增 [`anytls`](/zh/configuration/dns/server/anytls/) DNS 服务器：通过 AnyTLS 出站的会话把查询发往其服务器。服务器未启用 `dns` 时查询立即失败，代理连接不受影响
+* 新增 [`group`](/zh/configuration/dns/server/group/) DNS 服务器：以 `load_balance`、`parallel` 或 `sequential` 模式把查询分散到 `udp`、`tcp`、`tls` 和 `https` DNS 服务器，全部失败时尝试 `fallbacks`。组作为一个服务器缓存
+* 更新 sing-anytls 至 v0.0.14-kexi.9，新增会话内 DNS 帧，并修复会话关闭后 SYNACK 看门狗仍会运行至多 3 秒的问题
+
+#### 1.14.2.9
+
+* 入站新增 [`listen_unix`](/zh/configuration/shared/listen/#listen_unix)：监听 Unix 域套接字而非 TCP 端口（仅 Linux，仅 TCP）
+* socks、http、http-dynamic、shadowsocks、vmess、trojan、vless、anytls、shadowtls、ssh、snell 和 noisy-shuttle 出站以及 shadowtls 入站握手新增 [`server_unix`](/zh/configuration/outbound/socks/#server_unix)：通过 Unix 域套接字连接服务器（仅 Linux，仅 TCP）。`server` 和 `server_port` 变为可选，仅用于默认的 TLS 服务器名称和传输层 `Host`
+* 加载多个配置文件时，若某个出站的标签已在之前的文件中（按路径字典序）出现过，现在会原位替换之前的定义，而不再报错 `duplicate outbound/endpoint tag`。参阅 [合并](/zh/configuration/#合并)
+
+#### 1.14.2.7
+
+* 修复 [`anytls.connection_lifetime_jitter`](/zh/configuration/outbound/anytls/#connection_lifetime_jitter) 几乎不起作用的问题：此前每个会话的生命周期都是 `max_connection_lifetime` 减去一半抖动，同时建立的会话会同时到期。现在生命周期在正负抖动范围内均匀随机选取
+
+#### 1.14.2.6
+
+* 新增 [`anytls.close_after_idle`](/zh/configuration/outbound/anytls/#close_after_idle)：关闭空闲超过此值的会话，不受连接池设置限制，用于替换几乎不会被选中的高延迟会话
+* 新增 [`anytls.close_after_lifetime`](/zh/configuration/outbound/anytls/#close_after_lifetime)：会话超过此值（含抖动）后不再复用，并在其连接结束后关闭，不会打断连接
+* `anytls.session.selected` 调试事件新增 `retire_at` 和 `retire_left` 字段
+
+#### 1.14.2.5
+
+* 为 [`urltest`](/zh/configuration/outbound/urltest/#latency_mode) 和 [`loadbalance`](/zh/configuration/outbound/loadbalance/#latency_mode) 新增 `latency_mode: "session"`：按新连接将要使用的会话延迟为 `anytls` 成员排序，并按连接选择成员；其他成员回退到 URL 测试结果
+* `urltest` 在 session 模式下为每个连接记录一条 `urltest.select` 调试事件
+
+#### 1.14.2.4
+
+* 每个新的 anytls 连接都会记录一条 [`anytls.session.selected`](/zh/configuration/outbound/anytls/#会话选择) 调试事件，包含会话的延迟、使用次数、创建与到期时间以及剩余生命周期
+* 修复 AnyTLS 接收循环与打开流之间对对端版本的数据竞争
+
+#### 1.14.2.3
+
+* [`anytls`](/zh/configuration/outbound/anytls/#会话选择) 出站在客户端测量每个会话的端到端延迟，来源为设置帧交换和每次心跳，无需修改服务端
+* 新的 anytls 连接使用延迟最低的空闲会话；`max_connection_lifetime` 优先关闭延迟最高的会话，`min_idle_session` 和 `min_idle_session_for_age` 保留延迟最低的会话
+* AnyTLS 会话现在在建立连接时即发送设置帧，而非随第一个请求发送，因此预建的空闲会话也能被测量，其心跳也会真正发往服务端
+* 修复 AnyTLS 服务端在流打开后立即发送的数据被丢弃的问题
+
+#### 1.14.2.2
+
+* 新增 [`anytls.fallback`](/zh/configuration/inbound/anytls/#fallback)：将 AnyTLS 认证失败的连接转发到后端服务器，与 trojan 入站相同
+* 说明 [`anytls`](/zh/configuration/inbound/anytls/#tls) 入站在 `tls` 为空时接受明文连接，用于前置终止 TLS 的反向代理
+
 #### 1.14.2.1
 
 * 新增 [`cloudflare-warp.ephemeral`](/zh/configuration/outbound/cloudflare-warp/#ephemeral)：每次启动注册一个仅保存在内存中的设备，并在退出时从 Cloudflare 删除，适用于没有缓存文件的无状态节点

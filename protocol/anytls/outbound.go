@@ -6,6 +6,7 @@ import (
 	"os"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/adapter/outbound"
@@ -22,7 +23,6 @@ import (
 	"github.com/sagernet/sing/common/uot"
 
 	anytls "github.com/anytls/sing-anytls"
-	"github.com/anytls/sing-anytls/session"
 )
 
 func RegisterOutbound(registry *outbound.Registry) {
@@ -33,16 +33,14 @@ var _ adapter.OutboundWithMultiplex = (*Outbound)(nil)
 
 type Outbound struct {
 	outbound.Adapter
-	ctx            context.Context
-	dialer         tls.Dialer
-	server         M.Socksaddr
-	tlsConfig      tls.Config
-	clientOptions  anytls.ClientConfig
-	clientMetadata string
-	client         *anytls.Client
-	sessionClient  *session.Client
-	uotClient      *uot.Client
-	logger         log.StructuredLogger
+	ctx           context.Context
+	dialer        tls.Dialer
+	server        M.Socksaddr
+	tlsConfig     tls.Config
+	clientOptions anytls.ClientConfig
+	client        *anytls.Client
+	uotClient     *uot.Client
+	logger        log.StructuredLogger
 
 	stats                 *transportstats.Collector
 	conns                 connTracker
@@ -81,7 +79,8 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.Structur
 	outboundDialer, err := dialer.NewWithOptions(dialer.Options{
 		Context:        ctx,
 		Options:        options.DialerOptions,
-		RemoteIsDomain: options.ServerIsDomain(),
+		RemoteIsDomain: options.ServerUnix == "" && options.ServerIsDomain(),
+		ServerUnix:     options.ServerUnix,
 	})
 	if err != nil {
 		return nil, err
@@ -100,10 +99,12 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.Structur
 		MaxConnectionLifetime:       options.MaxConnectionLifetime.Build(),
 		ConnectionLifetimeJitter:    options.ConnectionLifetimeJitter.Build(),
 		EnsureIdleSessionCreateRate: options.EnsureIdleSessionCreateRate,
+		ClientMetadata:              options.ClientMetadata,
+		CloseAfterIdle:              options.CloseAfterIdle.Build(),
+		CloseAfterLifetime:          options.CloseAfterLifetime.Build(),
 		DialOut:                     outbound.dialOut,
 		Logger:                      logger,
 	}
-	outbound.clientMetadata = options.ClientMetadata
 	// With a detour the socket under the TLS connection belongs to another
 	// outbound's transport, so its TCP_INFO would describe that hop instead.
 	outbound.localStatsUnavailable = options.DialerOptions.Detour != ""
@@ -121,27 +122,13 @@ func (h *Outbound) Start(stage adapter.StartStage) error {
 	h.statsAccess.Lock()
 	h.client = client
 	h.statsAccess.Unlock()
-	h.sessionClient = sessionClientOf(client)
+	client.SetSelectHandler(h.logSelectedSession)
 	h.applyServerStatsHandler()
 	h.uotClient = &uot.Client{
-		Dialer:  anytlsDialer(h.createProxy),
+		Dialer:  anytlsDialer(client.CreateProxy),
 		Version: uot.Version,
 	}
 	return nil
-}
-
-func (h *Outbound) createProxy(ctx context.Context, destination M.Socksaddr) (net.Conn, error) {
-	conn, err := h.sessionClient.CreateStream(ctx)
-	if err != nil {
-		return nil, err
-	}
-	h.rewriteClientMetadata(conn)
-	err = M.SocksaddrSerializer.WriteAddrPort(conn, destination)
-	if err != nil {
-		conn.Close()
-		return nil, err
-	}
-	return conn, nil
 }
 
 type anytlsDialer func(ctx context.Context, destination M.Socksaddr) (net.Conn, error)
@@ -162,6 +149,20 @@ func (h *Outbound) dialOut(ctx context.Context) (net.Conn, error) {
 	return h.conns.track(conn), nil
 }
 
+var _ adapter.OutboundWithSessionLatency = (*Outbound)(nil)
+
+// SessionLatency is the smoothed latency of the idle session a new connection
+// would be placed on, the lowest among measured idle sessions.
+func (h *Outbound) SessionLatency() (time.Duration, bool) {
+	h.statsAccess.Lock()
+	client := h.client
+	h.statsAccess.Unlock()
+	if client == nil {
+		return 0, false
+	}
+	return client.IdleLatency()
+}
+
 func (h *Outbound) MultiplexEnabled() bool {
 	return true
 }
@@ -173,7 +174,7 @@ func (h *Outbound) DialContext(ctx context.Context, network string, destination 
 	switch N.NetworkName(network) {
 	case N.NetworkTCP:
 		adapter.LogOutboundConnection(h.logger, ctx, destination)
-		return h.createProxy(ctx, destination)
+		return h.client.CreateProxy(ctx, destination)
 	case N.NetworkUDP:
 		adapter.LogOutboundPacket(h.logger, ctx, destination)
 		return h.uotClient.DialContext(ctx, network, destination)

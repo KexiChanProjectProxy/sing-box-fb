@@ -13,6 +13,7 @@ icon: material/new-box
 
   "server": "127.0.0.1",
   "server_port": 1080,
+  "server_unix": "",
   "password": "8JCsPssfgS8tiRwiMlhARg==",
   "idle_session_check_interval": "30s",
   "idle_session_timeout": "30s",
@@ -23,6 +24,8 @@ icon: material/new-box
 	"max_connection_lifetime": "300s",
 	"connection_lifetime_jitter": "10s",
 	"ensure_idle_session_create_rate": 5,
+	"close_after_idle": "",
+	"close_after_lifetime": "",
 	"client_metadata": "",
   "tls": {},
 
@@ -38,11 +41,29 @@ icon: material/new-box
 
 The server address.
 
+Not required when [server_unix](#server_unix) is set.
+
 #### server_port
 
 ==Required==
 
 The server port.
+
+Not required when [server_unix](#server_unix) is set.
+
+#### server_unix
+
+!!! quote ""
+
+    Only supported on Linux.
+
+Path of a Unix domain socket to connect to instead of `server`:`server_port`, such as a local reverse proxy or another sing-box listening with [listen_unix](/configuration/shared/listen/#listen_unix).
+
+When set, `server` and `server_port` are never dialed or resolved and become optional. If they are set, they are still used as the default TLS `server_name` and as the default `Host` of the V2Ray transport, if any. Otherwise set `tls.server_name`.
+
+Only TCP is carried over the socket. UDP keeps working where the protocol carries it inside the TCP connection, for example with `udp_over_tcp`.
+
+Cannot be used with `detour`, `tcp_fast_open`, `tcp_multi_path`, `bind_interface`, `routing_mark` or `network_strategy`.
 
 #### password
 
@@ -52,39 +73,57 @@ The AnyTLS password.
 
 #### idle_session_check_interval
 
-Interval checking for idle sessions. Default: 30s.
+Interval of the pool maintenance that applies `idle_session_timeout`, `max_connection_lifetime`, `ensure_idle_session`, `close_after_idle` and `close_after_lifetime` to idle sessions. Default: 30s. A value of 5s or less is replaced by the default.
 
 #### idle_session_timeout
 
-In the check, close sessions that have been idle for longer than this. Default: 30s.
+In the check, close sessions that have been idle for longer than this, except those kept by `min_idle_session`. Default: 30s. A value of 5s or less is replaced by the default.
 
 #### min_idle_session
 
-In the check, at least the first `n` idle sessions are kept open. Default value: `n`=0
+In the check, keep at least `n` idle sessions open, counting those not yet past `idle_session_timeout`. The expired sessions kept are the lowest-latency ones, see [Session selection](#session-selection). Default: `0`.
 
 #### ensure_idle_session
 
-Target number of idle sessions to maintain in the pool.
+Target number of idle sessions to maintain in the pool. Each check dials the missing ones, at most `ensure_idle_session_create_rate` at a time.
 
 #### heartbeat
 
 Interval for sending heartbeat packets to keep sessions alive.
 
+Each heartbeat round trip also refreshes the session's latency, see [Session selection](#session-selection).
+
 #### min_idle_session_for_age
 
-Minimum idle sessions protected from age-based cleanup.
+Minimum number of idle sessions that `max_connection_lifetime` leaves open. When it has to choose, it keeps the lowest-latency ones.
 
 #### max_connection_lifetime
 
-Maximum lifetime of a connection before it is recycled.
+Maximum age of a session. In each check, idle sessions past it are closed, the highest-latency ones first, while at least `min_idle_session_for_age` idle sessions stay open. A session carrying a connection is not affected and can still be reused after it is past this age; use [`close_after_lifetime`](#close_after_lifetime) to stop reusing old sessions.
 
 #### connection_lifetime_jitter
 
-Random jitter added to max_connection_lifetime to avoid thundering herd.
+Random jitter applied to `max_connection_lifetime`. Each session's lifetime is drawn uniformly between `max_connection_lifetime` minus and plus this value, and is at least one second, so sessions created together do not expire together.
 
 #### ensure_idle_session_create_rate
 
 Maximum rate at which new idle sessions are created per interval.
+
+#### close_after_idle
+
+Close a session that has been idle for longer than this. Disabled when empty.
+
+Unlike `idle_session_timeout`, it ignores `min_idle_session` and `ensure_idle_session`, so a session that new connections keep passing over, such as a slow one, is always replaced; `ensure_idle_session` dials a fresh session in its place. Sessions are checked every `idle_session_check_interval`.
+
+Without traffic, the sessions kept by `ensure_idle_session` are replaced once per `close_after_idle`.
+
+#### close_after_lifetime
+
+Stop reusing a session older than this, and close it. Disabled when empty.
+
+Each session's limit is drawn between 90% and 100% of this value, so sessions created together do not all retire at once. From then on the session is never given a new connection. It closes at once when idle, and otherwise as soon as the connection it carries ends, so no connection is interrupted. A connection that stays open keeps its session alive until it ends.
+
+Unlike `max_connection_lifetime`, it ignores `min_idle_session_for_age`.
 
 #### client_metadata
 
@@ -97,6 +136,37 @@ Check [AnyTLS client metadata](/manual/misc/anytls-client-metadata/).
 ==Required==
 
 TLS configuration, see [TLS](/configuration/shared/tls/#outbound).
+
+### Session selection
+
+The client measures the end-to-end latency of every session itself, so no server support is needed. A session sends its settings as soon as it is opened and is timed by the server's reply, and every [heartbeat](#heartbeat) adds another sample to a smoothed average.
+
+* A new connection uses the idle session with the lowest latency. Sessions not yet measured come after measured ones, newest first.
+* Sessions closed by `max_connection_lifetime` are the highest-latency ones first, with unmeasured ones before them; `min_idle_session_for_age` keeps the lowest-latency ones.
+* `min_idle_session` likewise keeps the lowest-latency idle sessions open.
+
+Pre-created sessions from `ensure_idle_session` are measured right after they connect, before they carry any traffic. Without `heartbeat`, a session's latency is only measured once.
+
+At `debug` level every new connection logs an `anytls.session.selected` event describing its session. Durations are in milliseconds and times in UTC.
+
+| Field | Meaning |
+|---|---|
+| `session` | Session number, from 1 |
+| `source` | `pool` for an idle session reused, `new` for one dialed for this connection |
+| `streams` | Connections opened on the session, this one included |
+| `created_at`, `age` | When the session was created, and its age |
+| `idle_for` | How long a reused session was idle |
+| `latency`, `latency_last`, `latency_samples` | Smoothed and latest latency, and the number of samples; the first two are omitted until measured |
+| `max_lifetime`, `expires_at`, `lifetime_left` | The session's lifetime with jitter, when it expires, and the time left, negative once expired; omitted without `max_connection_lifetime` |
+| `retire_at`, `retire_left` | When the session stops being reused under `close_after_lifetime`, and the time left; omitted without it |
+| `idle_sessions`, `total_sessions` | Idle and total sessions after the pick |
+
+### DNS
+
+!!! question "Since sing-box 1.14.2.11"
+
+The outbound can also carry DNS queries to its server inside its sessions, without opening a stream.
+Use it from an [AnyTLS DNS server](/configuration/dns/server/anytls/); the server must enable [`dns`](/configuration/inbound/anytls/#dns) on its inbound.
 
 ### Dial Fields
 

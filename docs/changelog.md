@@ -2,6 +2,51 @@
 icon: material/alert-decagram
 ---
 
+#### 1.14.2.11
+
+* Add [`anytls.dns`](/configuration/inbound/anytls/#dns) to the AnyTLS inbound: answer DNS queries that clients send inside their session, as frames of their own rather than streams. Queries go to the DNS server named in `dns.server`, sharing its cache with sing-box's own queries, or through the DNS rules. The server only offers this to clients that support it, so other AnyTLS clients are unaffected
+* Add the [`anytls`](/configuration/dns/server/anytls/) DNS server: send queries to the server of an AnyTLS outbound inside its sessions. Against a server without `dns` enabled, queries fail at once and proxied connections keep working
+* Add the [`group`](/configuration/dns/server/group/) DNS server: spread queries over `udp`, `tcp`, `tls` and `https` DNS servers with `load_balance`, `parallel` or `sequential` mode, and fall back to `fallbacks` when they all fail. The group is cached as one server
+* Update sing-anytls to v0.0.14-kexi.9, which adds the in-session DNS frames and stops a closed session's SYNACK watchdog from running on for up to 3 seconds
+
+#### 1.14.2.9
+
+* Add [`listen_unix`](/configuration/shared/listen/#listen_unix) to inbounds: listen on a Unix domain socket instead of a TCP port (Linux only, TCP only)
+* Add [`server_unix`](/configuration/outbound/socks/#server_unix) to the socks, http, http-dynamic, shadowsocks, vmess, trojan, vless, anytls, shadowtls, ssh, snell and noisy-shuttle outbounds and to the shadowtls inbound handshake: connect to the server over a Unix domain socket (Linux only, TCP only). `server` and `server_port` become optional and only set the default TLS server name and transport `Host`
+* When several configuration files are loaded, an outbound whose tag already exists in an earlier file (in lexical path order) now replaces that definition in place instead of failing with `duplicate outbound/endpoint tag`. See [Merge](/configuration/#merge)
+
+#### 1.14.2.7
+
+* Fix [`anytls.connection_lifetime_jitter`](/configuration/outbound/anytls/#connection_lifetime_jitter) having almost no effect: every session got `max_connection_lifetime` minus half the jitter, so sessions created together expired together. Lifetimes are now drawn uniformly within the jitter on either side
+
+#### 1.14.2.6
+
+* Add [`anytls.close_after_idle`](/configuration/outbound/anytls/#close_after_idle): close sessions idle for longer than this regardless of the pool settings, so slow sessions that are almost never selected are replaced
+* Add [`anytls.close_after_lifetime`](/configuration/outbound/anytls/#close_after_lifetime): stop reusing sessions older than this, with jitter, and close them once their connection ends, without interrupting it
+* Report `retire_at` and `retire_left` in the `anytls.session.selected` debug event
+
+#### 1.14.2.5
+
+* Add `latency_mode: "session"` to [`urltest`](/configuration/outbound/urltest/#latency_mode) and [`loadbalance`](/configuration/outbound/loadbalance/#latency_mode): rank `anytls` members on the latency of the session a new connection would use and choose the member per connection; other members fall back to their URL test result
+* Log a `urltest.select` debug event for each connection in `urltest` session mode
+
+#### 1.14.2.4
+
+* Log an [`anytls.session.selected`](/configuration/outbound/anytls/#session-selection) debug event for every new anytls connection, with the session's latency, use count, creation and expiry time, and lifetime left
+* Fix a data race on the AnyTLS peer version between the receive loop and opening a stream
+
+#### 1.14.2.3
+
+* [`anytls`](/configuration/outbound/anytls/#session-selection) outbound measures the end-to-end latency of every session on the client, from the settings exchange and each heartbeat, and needs no server change
+* New anytls connections use the lowest-latency idle session; `max_connection_lifetime` closes the highest-latency sessions first, and `min_idle_session` and `min_idle_session_for_age` keep the lowest-latency ones
+* AnyTLS sessions now send their settings when they connect instead of with the first request, so pre-created idle sessions are measured and their heartbeats reach the server
+* Fix AnyTLS data sent by the server right after a stream opens being dropped
+
+#### 1.14.2.2
+
+* Add [`anytls.fallback`](/configuration/inbound/anytls/#fallback): forward connections that fail AnyTLS authentication to a backend server, like the trojan inbound
+* Document that the [`anytls`](/configuration/inbound/anytls/#tls) inbound accepts plaintext connections when `tls` is empty, for use behind a TLS-terminating reverse proxy
+
 #### 1.14.2.1
 
 * Add [`cloudflare-warp.ephemeral`](/configuration/outbound/cloudflare-warp/#ephemeral): register a device at every start, keep it only in memory, and delete it from Cloudflare on shutdown, for stateless nodes without a cache file
