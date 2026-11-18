@@ -49,6 +49,10 @@ type Inbound struct {
 	dnsTransportManager adapter.DNSTransportManager
 	dnsServerTag        string
 	dnsServer           adapter.DNSTransport
+
+	// trackingRouter accounts probe traffic, and is nil when the router
+	// cannot.
+	trackingRouter adapter.ConnectionTrackingRouter
 }
 
 func NewInbound(ctx context.Context, router adapter.Router, logger log.StructuredLogger, tag string, options option.AnyTLSInboundOptions) (adapter.Inbound, error) {
@@ -57,6 +61,7 @@ func NewInbound(ctx context.Context, router adapter.Router, logger log.Structure
 		router:  uot.NewRouter(router, logger),
 		logger:  logger,
 	}
+	inbound.trackingRouter, _ = router.(adapter.ConnectionTrackingRouter)
 
 	if options.TLS != nil && options.TLS.Enabled {
 		tlsConfig, err := tls.NewServer(ctx, logger, common.PtrValueOrDefault(options.TLS))
@@ -101,6 +106,7 @@ func NewInbound(ctx context.Context, router adapter.Router, logger log.Structure
 		Logger:          logger,
 		StatsProvider:   serverStats,
 		DNSHandler:      dnsHandler,
+		Probe:           inbound.probeServerConfig(options.Probe),
 	})
 	if err != nil {
 		return nil, err
